@@ -17,7 +17,7 @@ WRITE_UUID_2 = "0000fff2-0000-1000-8000-00805f9b34fb"
 class AccelSensor:
     """BLE interface for WT901BLE67 IMU accelerometer sensor."""
 
-    def __init__(self, mac_address, device_name="ACCELEROMETER", data_callback=None, throttle=5):
+    def __init__(self, mac_address, device_name="ACCELEROMETER", data_callback=None, throttle=5, max_retries=3):
         """
         Initialize accelerometer sensor.
 
@@ -26,6 +26,7 @@ class AccelSensor:
             device_name: Identifier (default: 'ACCELEROMETER')
             data_callback: Optional async function to call with parsed data
             throttle: Process every Nth packet (default: 5, reduces 100Hz -> 20Hz)
+            max_retries: Maximum connection retry attempts (default: 3)
         """
         self.mac = mac_address
         self.name = device_name
@@ -37,6 +38,7 @@ class AccelSensor:
         self.packet_buffer = bytearray()
         self.throttle = throttle
         self.packet_count = 0
+        self.max_retries = max_retries
 
     def _notification_handler(self, sender, raw_data):
         """Handle incoming BLE notifications (binary 20-byte packets with throttling)."""

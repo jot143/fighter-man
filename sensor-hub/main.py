@@ -17,6 +17,22 @@ async def main():
     right_mac = os.getenv('RIGHT_FOOT_MAC')
     accel_mac = os.getenv('ACCELEROMETER_MAC')
 
+    # Load performance tuning parameters with defaults
+    try:
+        foot_throttle = int(os.getenv('FOOT_THROTTLE', '2'))
+        accel_throttle = int(os.getenv('ACCEL_THROTTLE', '5'))
+        connection_retries = int(os.getenv('CONNECTION_RETRIES', '3'))
+
+        # Validate ranges
+        foot_throttle = max(1, min(10, foot_throttle))
+        accel_throttle = max(1, min(10, accel_throttle))
+        connection_retries = max(1, min(10, connection_retries))
+    except ValueError:
+        print("Warning: Invalid performance tuning values in .env, using defaults")
+        foot_throttle = 2
+        accel_throttle = 5
+        connection_retries = 3
+
     # Validate MAC addresses
     if not left_mac or 'XX:XX' in left_mac.upper():
         print("Error: LEFT_FOOT_MAC not configured in .env")
@@ -37,29 +53,31 @@ async def main():
     print(f"Right Foot:     {right_mac or 'Not configured'}")
     print(f"Accelerometer:  {accel_mac or 'Not configured'}")
     print("=" * 60)
-    print("\nConnecting to devices with 3s delays...")
-    print("(All sensors throttled: Foot ~10Hz, Accelerometer ~20Hz)\n")
+    print(f"Throttle:       Foot={foot_throttle}, Accel={accel_throttle}")
+    print(f"Retries:        {connection_retries} attempts per device")
+    print("=" * 60)
+    print("\nConnecting to devices with 3s delays...\n")
 
     # Create sensor instances and tasks with delays
     tasks = []
 
     # Connect to left foot first (critical sensor)
-    print("[PRIORITY] Connecting to left foot sensor first...")
-    left_foot = FootSensor(left_mac, "LEFT_FOOT", throttle=2)  # Throttle to ~10Hz
+    print(f"[PRIORITY] Connecting to left foot sensor (throttle={foot_throttle})...")
+    left_foot = FootSensor(left_mac, "LEFT_FOOT", throttle=foot_throttle)
     tasks.append(asyncio.create_task(left_foot.monitor_loop()))
     await asyncio.sleep(3)  # Increased delay to avoid BLE stack overload
 
     # Connect to right foot
     if right_mac:
-        print("[PRIORITY] Connecting to right foot sensor...")
-        right_foot = FootSensor(right_mac, "RIGHT_FOOT", throttle=2)  # Throttle to ~10Hz
+        print(f"[PRIORITY] Connecting to right foot sensor (throttle={foot_throttle})...")
+        right_foot = FootSensor(right_mac, "RIGHT_FOOT", throttle=foot_throttle)
         tasks.append(asyncio.create_task(right_foot.monitor_loop()))
         await asyncio.sleep(3)  # Increased delay to avoid BLE stack overload
 
     # Connect to accelerometer (with throttling, lower priority)
     if accel_mac:
-        print("[SECONDARY] Connecting to accelerometer (throttled to 20Hz)...")
-        accelerometer = AccelSensor(accel_mac, "ACCELEROMETER", throttle=5)
+        print(f"[SECONDARY] Connecting to accelerometer (throttle={accel_throttle})...")
+        accelerometer = AccelSensor(accel_mac, "ACCELEROMETER", throttle=accel_throttle)
         tasks.append(asyncio.create_task(accelerometer.monitor_loop()))
 
     print("\n" + "=" * 60)
