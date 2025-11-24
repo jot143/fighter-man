@@ -105,8 +105,16 @@ class FootSensor:
                 self.client = BleakClient(device, timeout=15.0)
                 await self.client.connect()
 
-                # Wait for connection to stabilize
-                await asyncio.sleep(0.5)
+                # Wait briefly for connection to stabilize
+                await asyncio.sleep(0.2)
+
+                # Verify still connected
+                if not self.client.is_connected:
+                    print(f"[{self.name}] Connection lost immediately after connect")
+                    if attempt < max_retries:
+                        continue
+                    else:
+                        return False
 
                 print(f"[{self.name}] Connected to {self.mac}")
                 return True
@@ -124,8 +132,20 @@ class FootSensor:
 
     async def start_monitoring(self):
         """Start receiving pressure data."""
-        if not self.client or not self.client.is_connected:
-            print(f"[{self.name}] Not connected")
+        if not self.client:
+            print(f"[{self.name}] Error: No client object")
+            return False
+
+        # Check connection with retry
+        max_checks = 3
+        for check in range(max_checks):
+            if self.client.is_connected:
+                break
+            print(f"[{self.name}] Waiting for connection (check {check+1}/{max_checks})...")
+            await asyncio.sleep(0.5)
+
+        if not self.client.is_connected:
+            print(f"[{self.name}] Not connected after {max_checks} checks")
             return False
 
         try:
@@ -133,7 +153,7 @@ class FootSensor:
             await self.client.start_notify(NOTIFY_UUID, self._notification_handler)
 
             # Wait for notification setup to complete
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.3)
 
             # Now send begin command to start data collection
             await self.client.write_gatt_char(WRITE_UUID, b'begin', response=True)
