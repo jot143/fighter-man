@@ -2,28 +2,14 @@
 """Central BLE sensor monitoring system - monitors foot sensors and accelerometer concurrently."""
 
 import asyncio
-import signal
 import sys
 import os
 from dotenv import load_dotenv
 from sensors import FootSensor, AccelSensor
 
 
-# Global flag for graceful shutdown
-running = True
-
-
-def signal_handler(sig, frame):
-    """Handle Ctrl+C gracefully."""
-    global running
-    print("\n\nShutting down... Please wait for clean disconnect.")
-    running = False
-
-
 async def main():
     """Main entry point - monitor all sensors concurrently."""
-    global running
-
     # Load environment variables
     load_dotenv()
 
@@ -44,39 +30,59 @@ async def main():
         print("Warning: ACCELEROMETER_MAC not configured in .env - skipping accelerometer")
         accel_mac = None
 
-    # Setup signal handler
-    signal.signal(signal.SIGINT, signal_handler)
-
     print("=" * 60)
-    print("Central BLE Sensor Monitor")
+    print("Sensor Hub - BLE Monitor")
     print("=" * 60)
     print(f"Left Foot:      {left_mac}")
     print(f"Right Foot:     {right_mac or 'Not configured'}")
     print(f"Accelerometer:  {accel_mac or 'Not configured'}")
     print("=" * 60)
-    print("\nConnecting to devices...\n")
+    print("\nConnecting to devices with 2s delays...\n")
 
-    # Create sensor instances
-    sensors = []
+    # Create sensor instances and tasks with delays
+    tasks = []
 
+    # Connect to left foot first
     left_foot = FootSensor(left_mac, "LEFT_FOOT")
-    sensors.append(left_foot.monitor_loop())
+    tasks.append(asyncio.create_task(left_foot.monitor_loop()))
+    await asyncio.sleep(2)  # Delay to avoid BLE stack overload
 
+    # Connect to right foot
     if right_mac:
         right_foot = FootSensor(right_mac, "RIGHT_FOOT")
-        sensors.append(right_foot.monitor_loop())
+        tasks.append(asyncio.create_task(right_foot.monitor_loop()))
+        await asyncio.sleep(2)  # Delay to avoid BLE stack overload
 
+    # Connect to accelerometer
     if accel_mac:
         accelerometer = AccelSensor(accel_mac, "ACCELEROMETER")
-        sensors.append(accelerometer.monitor_loop())
+        tasks.append(asyncio.create_task(accelerometer.monitor_loop()))
+
+    print("\nAll devices connected. Monitoring... (Ctrl+C to stop)\n")
 
     # Monitor all sensors concurrently
     try:
-        await asyncio.gather(*sensors)
+        await asyncio.gather(*tasks)
     except asyncio.CancelledError:
-        pass
+        print("\n\nShutting down... Cleaning up connections.")
+        # Cancel all tasks
+        for task in tasks:
+            task.cancel()
+        # Wait for all tasks to finish cleanup
+        await asyncio.gather(*tasks, return_exceptions=True)
+    except KeyboardInterrupt:
+        print("\n\nShutting down... Cleaning up connections.")
+        # Cancel all tasks
+        for task in tasks:
+            task.cancel()
+        # Wait for all tasks to finish cleanup
+        await asyncio.gather(*tasks, return_exceptions=True)
     except Exception as e:
         print(f"\nError: {e}")
+        # Cancel all tasks on error
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     print("\n" + "=" * 60)
     print("All sensors disconnected. Goodbye!")
@@ -87,4 +93,4 @@ if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        pass
+        print("\nInterrupted during startup.")
