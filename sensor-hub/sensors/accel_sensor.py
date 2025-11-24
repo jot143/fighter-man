@@ -3,7 +3,7 @@
 import asyncio
 import json
 from datetime import datetime
-from bleak import BleakClient
+from bleak import BleakClient, BleakScanner
 from .parsers import parse_accel_data
 
 
@@ -17,7 +17,7 @@ WRITE_UUID_2 = "0000fff2-0000-1000-8000-00805f9b34fb"
 class AccelSensor:
     """BLE interface for WT901BLE67 IMU accelerometer sensor."""
 
-    def __init__(self, mac_address, device_name="ACCELEROMETER", data_callback=None):
+    def __init__(self, mac_address, device_name="ACCELEROMETER", data_callback=None, throttle=5):
         """
         Initialize accelerometer sensor.
 
@@ -25,6 +25,7 @@ class AccelSensor:
             mac_address: BLE MAC address
             device_name: Identifier (default: 'ACCELEROMETER')
             data_callback: Optional async function to call with parsed data
+            throttle: Process every Nth packet (default: 5, reduces 100Hz -> 20Hz)
         """
         self.mac = mac_address
         self.name = device_name
@@ -34,9 +35,11 @@ class AccelSensor:
         self.notify_uuid = None
         self.write_uuid = None
         self.packet_buffer = bytearray()
+        self.throttle = throttle
+        self.packet_count = 0
 
     def _notification_handler(self, sender, raw_data):
-        """Handle incoming BLE notifications (binary 20-byte packets)."""
+        """Handle incoming BLE notifications (binary 20-byte packets with throttling)."""
         try:
             # Accumulate data
             self.packet_buffer.extend(raw_data)
@@ -45,6 +48,11 @@ class AccelSensor:
             while len(self.packet_buffer) >= 20:
                 packet = bytes(self.packet_buffer[:20])
                 self.packet_buffer = self.packet_buffer[20:]
+
+                # Throttle: only process every Nth packet
+                self.packet_count += 1
+                if self.packet_count % self.throttle != 0:
+                    continue
 
                 result = parse_accel_data(packet)
                 if result:
@@ -97,21 +105,58 @@ class AccelSensor:
             self.write_uuid = WRITE_UUID_1
             return True
 
-    async def connect(self):
-        """Establish BLE connection."""
-        try:
-            self.client = BleakClient(self.mac, timeout=15.0)
-            await self.client.connect()
-            print(f"[{self.name}] Connected to {self.mac}")
+    async def connect(self, max_retries=3):
+        """
+        Establish BLE connection with device scanning and retries.
 
-            # Discover correct UUIDs for this device
-            await self._discover_uuids()
+        Args:
+            max_retries: Maximum number of connection attempts (default: 3)
 
-            return True
+        Returns:
+            bool: True if connected successfully, False otherwise
+        """
+        for attempt in range(1, max_retries + 1):
+            try:
+                print(f"[{self.name}] Scanning for device {self.mac} (attempt {attempt}/{max_retries})...")
 
-        except Exception as e:
-            print(f"[{self.name}] Connection failed: {e}")
-            return False
+                # Scan for device with timeout
+                device = await BleakScanner.find_device_by_address(
+                    self.mac,
+                    timeout=10.0
+                )
+
+                if not device:
+                    print(f"[{self.name}] Device not found during scan")
+                    if attempt < max_retries:
+                        print(f"[{self.name}] Retrying in 3 seconds...")
+                        await asyncio.sleep(3)
+                        continue
+                    else:
+                        print(f"[{self.name}] Failed after {max_retries} attempts")
+                        return False
+
+                print(f"[{self.name}] Device found, connecting...")
+
+                # Connect to device
+                self.client = BleakClient(device, timeout=15.0)
+                await self.client.connect()
+                print(f"[{self.name}] Connected to {self.mac}")
+
+                # Discover correct UUIDs for this device
+                await self._discover_uuids()
+
+                return True
+
+            except Exception as e:
+                print(f"[{self.name}] Connection attempt {attempt} failed: {e}")
+                if attempt < max_retries:
+                    print(f"[{self.name}] Retrying in 3 seconds...")
+                    await asyncio.sleep(3)
+                else:
+                    print(f"[{self.name}] All connection attempts failed")
+                    return False
+
+        return False
 
     async def start_monitoring(self):
         """Start receiving IMU data."""
