@@ -3,7 +3,7 @@
 import asyncio
 import json
 from datetime import datetime
-from bleak import BleakClient
+from bleak import BleakClient, BleakScanner
 from .parsers import parse_foot_data
 
 
@@ -61,16 +61,58 @@ class FootSensor:
         except Exception as e:
             print(f"[{self.name}] Notification error: {e}")
 
-    async def connect(self):
-        """Establish BLE connection."""
-        try:
-            self.client = BleakClient(self.mac, timeout=15.0)
-            await self.client.connect()
-            print(f"[{self.name}] Connected to {self.mac}")
-            return True
-        except Exception as e:
-            print(f"[{self.name}] Connection failed: {e}")
-            return False
+    async def connect(self, max_retries=3):
+        """
+        Establish BLE connection with device scanning and retries.
+
+        Args:
+            max_retries: Maximum number of connection attempts (default: 3)
+
+        Returns:
+            bool: True if connected successfully, False otherwise
+        """
+        for attempt in range(1, max_retries + 1):
+            try:
+                print(f"[{self.name}] Scanning for device {self.mac} (attempt {attempt}/{max_retries})...")
+
+                # Scan for device with timeout
+                device = await BleakScanner.find_device_by_address(
+                    self.mac,
+                    timeout=10.0
+                )
+
+                if not device:
+                    print(f"[{self.name}] Device not found during scan")
+                    if attempt < max_retries:
+                        print(f"[{self.name}] Retrying in 3 seconds...")
+                        await asyncio.sleep(3)
+                        continue
+                    else:
+                        print(f"[{self.name}] Failed after {max_retries} attempts")
+                        return False
+
+                print(f"[{self.name}] Device found, connecting...")
+
+                # Connect to device
+                self.client = BleakClient(device, timeout=15.0)
+                await self.client.connect()
+
+                # Wait for connection to stabilize
+                await asyncio.sleep(0.5)
+
+                print(f"[{self.name}] Connected to {self.mac}")
+                return True
+
+            except Exception as e:
+                print(f"[{self.name}] Connection attempt {attempt} failed: {e}")
+                if attempt < max_retries:
+                    print(f"[{self.name}] Retrying in 3 seconds...")
+                    await asyncio.sleep(3)
+                else:
+                    print(f"[{self.name}] All connection attempts failed")
+                    return False
+
+        return False
 
     async def start_monitoring(self):
         """Start receiving pressure data."""
