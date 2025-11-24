@@ -16,7 +16,7 @@ WRITE_UUID = "0000FFF2-0000-1000-8000-00805F9B34FB"
 class FootSensor:
     """BLE interface for foot pressure sensor."""
 
-    def __init__(self, mac_address, device_name, data_callback=None):
+    def __init__(self, mac_address, device_name, data_callback=None, throttle=1):
         """
         Initialize foot sensor.
 
@@ -24,6 +24,7 @@ class FootSensor:
             mac_address: BLE MAC address
             device_name: Identifier (e.g., 'LEFT_FOOT', 'RIGHT_FOOT')
             data_callback: Optional async function to call with parsed data
+            throttle: Process every Nth packet (default: 1 = no throttling)
         """
         self.mac = mac_address
         self.name = device_name
@@ -31,9 +32,11 @@ class FootSensor:
         self.client = None
         self.running = False
         self.data_buffer = ""
+        self.throttle = throttle
+        self.packet_count = 0
 
     def _notification_handler(self, sender, raw_data):
-        """Handle incoming BLE notifications (text protocol with newline delimiters)."""
+        """Handle incoming BLE notifications (text protocol with newline delimiters and throttling)."""
         try:
             chunk = raw_data.decode('utf-8')
             self.data_buffer += chunk
@@ -44,6 +47,11 @@ class FootSensor:
                 line = line.strip()
 
                 if line:
+                    # Throttle: only process every Nth packet
+                    self.packet_count += 1
+                    if self.packet_count % self.throttle != 0:
+                        continue
+
                     result = parse_foot_data(line)
                     if result:
                         output = {
