@@ -63,21 +63,21 @@ async def main():
 
     # Connect to left foot first (critical sensor)
     print(f"[PRIORITY] Connecting to left foot sensor (throttle={foot_throttle})...")
-    left_foot = FootSensor(left_mac, "LEFT_FOOT", throttle=foot_throttle)
+    left_foot = FootSensor(left_mac, "LEFT_FOOT", throttle=foot_throttle, max_retries=connection_retries)
     tasks.append(asyncio.create_task(left_foot.monitor_loop()))
     await asyncio.sleep(3)  # Increased delay to avoid BLE stack overload
 
     # Connect to right foot
     if right_mac:
         print(f"[PRIORITY] Connecting to right foot sensor (throttle={foot_throttle})...")
-        right_foot = FootSensor(right_mac, "RIGHT_FOOT", throttle=foot_throttle)
+        right_foot = FootSensor(right_mac, "RIGHT_FOOT", throttle=foot_throttle, max_retries=connection_retries)
         tasks.append(asyncio.create_task(right_foot.monitor_loop()))
         await asyncio.sleep(3)  # Increased delay to avoid BLE stack overload
 
     # Connect to accelerometer (with throttling, lower priority)
     if accel_mac:
         print(f"[SECONDARY] Connecting to accelerometer (throttle={accel_throttle})...")
-        accelerometer = AccelSensor(accel_mac, "ACCELEROMETER", throttle=accel_throttle)
+        accelerometer = AccelSensor(accel_mac, "ACCELEROMETER", throttle=accel_throttle, max_retries=connection_retries)
         tasks.append(asyncio.create_task(accelerometer.monitor_loop()))
 
     print("\n" + "=" * 60)
