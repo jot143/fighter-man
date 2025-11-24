@@ -74,7 +74,8 @@ class AccelSensor:
     async def _discover_uuids(self):
         """Discover which UUID pattern this device uses."""
         try:
-            services = await self.client.get_services()
+            # Use services property instead of deprecated get_services()
+            services = self.client.services
 
             for service in services:
                 for char in service.characteristics:

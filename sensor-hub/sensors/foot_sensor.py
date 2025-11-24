@@ -76,20 +76,30 @@ class FootSensor:
         """Start receiving pressure data."""
         if not self.client or not self.client.is_connected:
             print(f"[{self.name}] Not connected")
-            return
+            return False
 
         try:
-            # Enable notifications
+            # Enable notifications FIRST, before sending begin command
             await self.client.start_notify(NOTIFY_UUID, self._notification_handler)
 
-            # Send begin command to start data collection
+            # Wait for notification setup to complete
+            await asyncio.sleep(0.5)
+
+            # Now send begin command to start data collection
             await self.client.write_gatt_char(WRITE_UUID, b'begin', response=True)
 
             print(f"[{self.name}] Monitoring started")
             self.running = True
+            return True
 
         except Exception as e:
             print(f"[{self.name}] Start monitoring failed: {e}")
+            # Try to clean up
+            try:
+                await self.client.stop_notify(NOTIFY_UUID)
+            except:
+                pass
+            return False
 
     async def stop_monitoring(self):
         """Stop receiving data and disconnect."""
@@ -121,9 +131,13 @@ class FootSensor:
             duration: Optional duration in seconds (None = run indefinitely)
         """
         if not await self.connect():
+            print(f"[{self.name}] Exiting - connection failed")
             return
 
-        await self.start_monitoring()
+        if not await self.start_monitoring():
+            print(f"[{self.name}] Exiting - monitoring start failed")
+            await self.stop_monitoring()
+            return
 
         try:
             start_time = asyncio.get_event_loop().time()
