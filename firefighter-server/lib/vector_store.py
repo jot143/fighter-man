@@ -493,7 +493,6 @@ class VectorStore:
                 "status": "healthy",
                 "collection": self.config.collection,
                 "points_count": info.points_count,
-                "vectors_count": info.vectors_count,
             }
         except Exception as e:
             return {
