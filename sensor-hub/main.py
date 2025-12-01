@@ -1,60 +1,138 @@
 #!/usr/bin/env python3
-"""Central BLE sensor monitoring system - monitors foot sensors and accelerometer concurrently."""
+"""Central BLE sensor monitoring system - monitors foot sensors and accelerometer concurrently.
+
+Data Flow:
+1. Sensors emit data via BLE
+2. Data is stored in SQLite (backup buffer)
+3. Data is broadcast via Socket.IO (if connected)
+4. Background senders retry failed transmissions
+"""
 
 import asyncio
+import json
 import sys
-import os
 from dotenv import load_dotenv
 from sensors import FootSensor, AccelSensor
+from lib.config import Config, SocketConfig, DatabaseConfig
+from lib.database.foot_db import FootDatabase
+from lib.database.accel_db import AccelDatabase
+from lib.socket_client import SocketIOClient
+
+
+# Global instances
+foot_db: FootDatabase = None
+accel_db: AccelDatabase = None
+socket_client: SocketIOClient = None
+
+
+async def handle_foot_data(data: dict):
+    """
+    Handle foot sensor data - store in SQLite and broadcast via Socket.IO.
+
+    Args:
+        data: Foot sensor reading
+    """
+    global foot_db, socket_client
+
+    # Always store in SQLite (backup)
+    if foot_db:
+        foot_db.save_record(data)
+
+    # Broadcast via Socket.IO if connected
+    if socket_client and socket_client.connected:
+        socket_client.emit("foot_pressure_data", data)
+
+    # Print to stdout (for debugging/logging)
+    print(json.dumps(data))
+
+
+async def handle_accel_data(data: dict):
+    """
+    Handle accelerometer data - store in SQLite and broadcast via Socket.IO.
+
+    Args:
+        data: Accelerometer sensor reading
+    """
+    global accel_db, socket_client
+
+    # Always store in SQLite (backup)
+    if accel_db:
+        accel_db.save_record(data)
+
+    # Broadcast via Socket.IO if connected
+    if socket_client and socket_client.connected:
+        socket_client.emit("accelerometer_data", data)
+
+    # Print to stdout (for debugging/logging)
+    print(json.dumps(data))
+
+
+def init_databases(config: DatabaseConfig):
+    """Initialize SQLite databases for sensor data storage."""
+    global foot_db, accel_db
+
+    print("[Database] Initializing SQLite storage...")
+    foot_db = FootDatabase(config.foot_db_file)
+    accel_db = AccelDatabase(config.accel_db_file)
+    print(f"[Database] Foot DB: {config.foot_db_file}")
+    print(f"[Database] Accel DB: {config.accel_db_file}")
+
+
+def init_socket(config: SocketConfig) -> bool:
+    """Initialize Socket.IO client for real-time data transmission."""
+    global socket_client
+
+    if not config.enabled:
+        print("[Socket.IO] Disabled in configuration")
+        return False
+
+    print(f"[Socket.IO] Connecting to {config.server_url}...")
+    socket_client = SocketIOClient(
+        server_url=config.server_url,
+        device_key=config.device_key,
+        namespace=config.namespace,
+    )
+
+    if socket_client.connect():
+        print("[Socket.IO] Connected successfully")
+        return True
+    else:
+        print("[Socket.IO] Connection failed - data will be buffered in SQLite")
+        return False
 
 
 async def main():
     """Main entry point - monitor all sensors concurrently."""
+    global socket_client
+
     # Load environment variables
     load_dotenv()
 
-    left_mac = os.getenv('LEFT_FOOT_MAC')
-    right_mac = os.getenv('RIGHT_FOOT_MAC')
-    accel_mac = os.getenv('ACCELEROMETER_MAC')
-
-    # Load performance tuning parameters with defaults
-    try:
-        foot_throttle = int(os.getenv('FOOT_THROTTLE', '2'))
-        accel_throttle = int(os.getenv('ACCEL_THROTTLE', '5'))
-        connection_retries = int(os.getenv('CONNECTION_RETRIES', '3'))
-
-        # Validate ranges
-        foot_throttle = max(1, min(10, foot_throttle))
-        accel_throttle = max(1, min(10, accel_throttle))
-        connection_retries = max(1, min(10, connection_retries))
-    except ValueError:
-        print("Warning: Invalid performance tuning values in .env, using defaults")
-        foot_throttle = 2
-        accel_throttle = 5
-        connection_retries = 3
+    # Load configuration
+    config = Config.from_env()
 
     # Validate MAC addresses
-    if not left_mac or 'XX:XX' in left_mac.upper():
+    if not config.ble.left_foot_mac:
         print("Error: LEFT_FOOT_MAC not configured in .env")
         sys.exit(1)
 
-    if not right_mac or 'XX:XX' in right_mac.upper():
-        print("Warning: RIGHT_FOOT_MAC not configured in .env - skipping right foot")
-        right_mac = None
+    print("=" * 60)
+    print("Sensor Hub - BLE Monitor with Data Pipeline")
+    print("=" * 60)
+    print(f"Left Foot:      {config.ble.left_foot_mac}")
+    print(f"Right Foot:     {config.ble.right_foot_mac or 'Not configured'}")
+    print(f"Accelerometer:  {config.ble.accelerometer_mac or 'Not configured'}")
+    print("=" * 60)
+    print(f"Throttle:       Foot={config.ble.foot_throttle}, Accel={config.ble.accel_throttle}")
+    print(f"Retries:        {config.ble.connection_retries} attempts per device")
+    print("=" * 60)
 
-    if not accel_mac or 'XX:XX' in accel_mac.upper():
-        print("Warning: ACCELEROMETER_MAC not configured in .env - skipping accelerometer")
-        accel_mac = None
+    # Initialize databases
+    init_databases(config.database)
 
-    print("=" * 60)
-    print("Sensor Hub - BLE Monitor")
-    print("=" * 60)
-    print(f"Left Foot:      {left_mac}")
-    print(f"Right Foot:     {right_mac or 'Not configured'}")
-    print(f"Accelerometer:  {accel_mac or 'Not configured'}")
-    print("=" * 60)
-    print(f"Throttle:       Foot={foot_throttle}, Accel={accel_throttle}")
-    print(f"Retries:        {connection_retries} attempts per device")
+    # Initialize Socket.IO
+    init_socket(config.socket)
+
     print("=" * 60)
     print("\nConnecting to devices with 3s delays...\n")
 
@@ -62,26 +140,45 @@ async def main():
     tasks = []
 
     # Connect to left foot first (critical sensor)
-    print(f"[PRIORITY] Connecting to left foot sensor (throttle={foot_throttle})...")
-    left_foot = FootSensor(left_mac, "LEFT_FOOT", throttle=foot_throttle, max_retries=connection_retries)
+    print(f"[PRIORITY] Connecting to left foot sensor (throttle={config.ble.foot_throttle})...")
+    left_foot = FootSensor(
+        config.ble.left_foot_mac,
+        "LEFT_FOOT",
+        data_callback=handle_foot_data,
+        throttle=config.ble.foot_throttle,
+        max_retries=config.ble.connection_retries,
+    )
     tasks.append(asyncio.create_task(left_foot.monitor_loop()))
-    await asyncio.sleep(3)  # Increased delay to avoid BLE stack overload
+    await asyncio.sleep(3)  # Delay to avoid BLE stack overload
 
     # Connect to right foot
-    if right_mac:
-        print(f"[PRIORITY] Connecting to right foot sensor (throttle={foot_throttle})...")
-        right_foot = FootSensor(right_mac, "RIGHT_FOOT", throttle=foot_throttle, max_retries=connection_retries)
+    if config.ble.right_foot_mac:
+        print(f"[PRIORITY] Connecting to right foot sensor (throttle={config.ble.foot_throttle})...")
+        right_foot = FootSensor(
+            config.ble.right_foot_mac,
+            "RIGHT_FOOT",
+            data_callback=handle_foot_data,
+            throttle=config.ble.foot_throttle,
+            max_retries=config.ble.connection_retries,
+        )
         tasks.append(asyncio.create_task(right_foot.monitor_loop()))
-        await asyncio.sleep(3)  # Increased delay to avoid BLE stack overload
+        await asyncio.sleep(3)  # Delay to avoid BLE stack overload
 
     # Connect to accelerometer (with throttling, lower priority)
-    if accel_mac:
-        print(f"[SECONDARY] Connecting to accelerometer (throttle={accel_throttle})...")
-        accelerometer = AccelSensor(accel_mac, "ACCELEROMETER", throttle=accel_throttle, max_retries=connection_retries)
+    if config.ble.accelerometer_mac:
+        print(f"[SECONDARY] Connecting to accelerometer (throttle={config.ble.accel_throttle})...")
+        accelerometer = AccelSensor(
+            config.ble.accelerometer_mac,
+            "ACCELEROMETER",
+            data_callback=handle_accel_data,
+            throttle=config.ble.accel_throttle,
+            max_retries=config.ble.connection_retries,
+        )
         tasks.append(asyncio.create_task(accelerometer.monitor_loop()))
 
     print("\n" + "=" * 60)
     print("All configured devices connected. Monitoring... (Ctrl+C to stop)")
+    print("Data is being stored in SQLite and broadcast via Socket.IO")
     print("=" * 60 + "\n")
 
     # Monitor all sensors concurrently
@@ -107,6 +204,10 @@ async def main():
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+    finally:
+        # Disconnect Socket.IO
+        if socket_client:
+            socket_client.disconnect()
 
     print("\n" + "=" * 60)
     print("All sensors disconnected. Goodbye!")
