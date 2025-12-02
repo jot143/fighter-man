@@ -47,7 +47,11 @@ class VectorStore:
             config: Qdrant configuration
         """
         self.config = config
-        self.client = QdrantClient(host=config.host, port=config.port)
+        self.client = QdrantClient(
+            host=config.host,
+            port=config.port,
+            timeout=10  # 10 second timeout to prevent hanging
+        )
 
         # Active windows being accumulated (keyed by session_id)
         self._active_windows: Dict[str, SensorWindow] = {}

@@ -29,10 +29,12 @@ app.config["SECRET_KEY"] = config.server.secret_key
 CORS(app)
 
 # Initialize Socket.IO
+# Using threading mode for development stability
+# For production with high concurrency, use gevent or eventlet
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
-    async_mode="eventlet",
+    async_mode="threading",
     logger=False,
     engineio_logger=False,
 )
@@ -433,4 +435,5 @@ if __name__ == "__main__":
         host=config.server.host,
         port=config.server.port,
         debug=config.server.debug,
+        allow_unsafe_werkzeug=True,  # Required for threading mode in development
     )

@@ -13,6 +13,7 @@ import time
 import math
 from datetime import datetime
 
+import requests
 import socketio
 
 
@@ -202,11 +203,60 @@ class SimulatedPi:
         print(f"[Simulation] Accel readings sent: {accel_count}")
 
 
+def create_session(server_url: str, session_name: str = None) -> str:
+    """Create a new recording session via REST API."""
+    if session_name is None:
+        session_name = f"test_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    try:
+        response = requests.post(
+            f"{server_url}/api/sessions",
+            json={"name": session_name},
+            timeout=10
+        )
+        if response.status_code == 201:
+            data = response.json()
+            return data.get("id")
+        else:
+            print(f"[Error] Failed to create session: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"[Error] Failed to create session: {e}")
+        return None
+
+
+def stop_session(server_url: str, session_id: str) -> bool:
+    """Stop a recording session via REST API."""
+    try:
+        response = requests.post(
+            f"{server_url}/api/sessions/{session_id}/stop",
+            timeout=10
+        )
+        return response.status_code == 200
+    except Exception as e:
+        print(f"[Error] Failed to stop session: {e}")
+        return False
+
+
+def check_health(server_url: str) -> dict:
+    """Check server health and return points count."""
+    try:
+        response = requests.get(f"{server_url}/health", timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except Exception as e:
+        print(f"[Error] Health check failed: {e}")
+        return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="Simulate Pi sending sensor data")
     parser.add_argument("--server", default="http://localhost:4100", help="Server URL")
     parser.add_argument("--duration", type=float, default=10, help="Duration in seconds")
     parser.add_argument("--device-key", default="firefighter_pi_001", help="Device key")
+    parser.add_argument("--session-name", default=None, help="Session name (auto-generated if not provided)")
+    parser.add_argument("--no-auto-session", action="store_true", help="Don't auto-create session")
     args = parser.parse_args()
 
     print("=" * 50)
@@ -216,6 +266,24 @@ def main():
     print(f"Device Key: {args.device_key}")
     print(f"Duration: {args.duration}s")
     print("=" * 50)
+
+    session_id = None
+
+    # Auto-create session unless disabled
+    if not args.no_auto_session:
+        print("\n[Setup] Creating session...")
+        session_id = create_session(args.server, args.session_name)
+        if session_id:
+            print(f"[Setup] Session created: {session_id}")
+        else:
+            print("[Error] Failed to create session. Data won't be stored!")
+            print("[Hint] Use --no-auto-session to skip auto-creation")
+
+    # Check initial health
+    health = check_health(args.server)
+    if health:
+        initial_points = health.get("qdrant", {}).get("points_count", 0)
+        print(f"[Setup] Initial points in Qdrant: {initial_points}")
 
     pi = SimulatedPi(args.server, args.device_key)
 
@@ -227,6 +295,25 @@ def main():
         pi.run_simulation(duration=args.duration)
     finally:
         pi.disconnect()
+
+    # Stop session and check results
+    if session_id:
+        print("\n[Cleanup] Stopping session...")
+        stop_session(args.server, session_id)
+
+        # Check final health
+        time.sleep(1)  # Wait for data to be flushed
+        health = check_health(args.server)
+        if health:
+            final_points = health.get("qdrant", {}).get("points_count", 0)
+            new_points = final_points - initial_points
+            print(f"\n[Results] Points stored in Qdrant: {new_points}")
+            print(f"[Results] Total points in Qdrant: {final_points}")
+
+            if new_points > 0:
+                print("\n[SUCCESS] Data was stored successfully!")
+            else:
+                print("\n[WARNING] No new data points were stored")
 
     print("\n[Done] Test client finished")
     return 0
