@@ -30,3 +30,4 @@ Thumbs.db
 *.log
 *.jsonl
 ssd-pi-engine/
+.DS_Store
