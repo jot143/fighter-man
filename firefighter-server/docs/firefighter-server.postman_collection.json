@@ -1,0 +1,310 @@
+{
+  "info": {
+    "name": "Firefighter Server API",
+    "description": "API collection for the Firefighter Server - Real-time sensor data collection and storage for firefighter activity recognition AI training.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "firefighter-server"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:4100",
+      "type": "string"
+    },
+    {
+      "key": "sessionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "windowId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Check server and Qdrant status, see active session and points count."
+          },
+          "response": [
+            {
+              "name": "Healthy Response",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"status\": \"healthy\",\n  \"server\": \"running\",\n  \"qdrant\": {\n    \"status\": \"healthy\",\n    \"collection\": \"sensor_windows\",\n    \"points_count\": 1250\n  },\n  \"active_session\": \"uuid-of-active-session\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Sessions",
+      "item": [
+        {
+          "name": "Create Session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.id) {",
+                  "    pm.collectionVariables.set('sessionId', jsonData.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"training_session_001\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/sessions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sessions"]
+            },
+            "description": "Create a new recording session. Pi devices will be notified to start streaming data."
+          },
+          "response": [
+            {
+              "name": "Session Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"name\": \"training_session_001\",\n  \"created_at\": \"2025-12-01T10:30:00.000Z\",\n  \"status\": \"recording\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "List Sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sessions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sessions"]
+            },
+            "description": "Get a list of all recording sessions."
+          },
+          "response": [
+            {
+              "name": "Sessions List",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"name\": \"training_session_001\",\n    \"created_at\": \"2025-12-01T10:30:00.000Z\",\n    \"status\": \"recording\"\n  },\n  {\n    \"id\": \"660e8400-e29b-41d4-a716-446655440001\",\n    \"name\": \"training_session_002\",\n    \"created_at\": \"2025-12-01T09:00:00.000Z\",\n    \"status\": \"stopped\"\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Get Session Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sessions/{{sessionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sessions", "{{sessionId}}"]
+            },
+            "description": "Get detailed information about a specific session including its time windows."
+          },
+          "response": [
+            {
+              "name": "Session Details",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"name\": \"training_session_001\",\n  \"created_at\": \"2025-12-01T10:30:00.000Z\",\n  \"status\": \"stopped\",\n  \"window_count\": 120,\n  \"windows\": [\n    {\n      \"id\": \"window-uuid-1\",\n      \"start_time\": 1701423000000,\n      \"end_time\": 1701423000500,\n      \"foot_count\": 5,\n      \"accel_count\": 10,\n      \"label\": \"Walking\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Session (Add Labels)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"renamed_session\",\n  \"status\": \"completed\",\n  \"labels\": {\n    \"window-uuid-1\": \"Walking\",\n    \"window-uuid-2\": \"Running\",\n    \"window-uuid-3\": \"Crawling\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/sessions/{{sessionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sessions", "{{sessionId}}"]
+            },
+            "description": "Update session properties and assign activity labels to time windows. Labels: Walking, Running, Crawling, Climbing, Standing, Kneeling, Carrying, Hose_Operation, Idle"
+          },
+          "response": [
+            {
+              "name": "Session Updated",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"name\": \"renamed_session\",\n  \"status\": \"completed\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Stop Session",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/stop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sessions", "{{sessionId}}", "stop"]
+            },
+            "description": "Stop recording for a session. Flushes remaining data buffers and marks session as stopped."
+          },
+          "response": [
+            {
+              "name": "Session Stopped",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"status\": \"stopped\",\n  \"stopped_at\": \"2025-12-01T11:00:00.000Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete Session",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sessions/{{sessionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sessions", "{{sessionId}}"]
+            },
+            "description": "Delete a session and all its associated sensor data windows."
+          },
+          "response": [
+            {
+              "name": "Session Deleted",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"message\": \"Session deleted\",\n  \"windows_deleted\": 120\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Export",
+      "item": [
+        {
+          "name": "Export Session (JSON)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/export?format=json&include_raw=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sessions", "{{sessionId}}", "export"],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "json",
+                  "description": "Export format: json or csv"
+                },
+                {
+                  "key": "include_raw",
+                  "value": "true",
+                  "description": "Include raw sensor readings in export"
+                }
+              ]
+            },
+            "description": "Export session data in JSON format for ML training pipelines. Set include_raw=true to get raw foot and accelerometer readings."
+          },
+          "response": [
+            {
+              "name": "JSON Export",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"session\": {\n    \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"name\": \"training_session_001\"\n  },\n  \"window_count\": 120,\n  \"windows\": [\n    {\n      \"id\": \"window-uuid-1\",\n      \"start_time\": 1701423000000,\n      \"end_time\": 1701423000500,\n      \"foot_count\": 5,\n      \"accel_count\": 10,\n      \"label\": \"Walking\",\n      \"raw_data\": {\n        \"foot\": [...],\n        \"accel\": [...]\n      }\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Export Session (CSV)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sessions/{{sessionId}}/export?format=csv",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "sessions", "{{sessionId}}", "export"],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "csv",
+                  "description": "Export format: json or csv"
+                }
+              ]
+            },
+            "description": "Export session data in CSV format for spreadsheet analysis."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Query",
+      "item": [
+        {
+          "name": "Find Similar Windows",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"window_id\": \"{{windowId}}\",\n  \"session_id\": null,\n  \"label\": null,\n  \"limit\": 10\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/query/similar",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "query", "similar"]
+            },
+            "description": "Find similar sensor patterns using vector similarity search in Qdrant. Useful for accelerating labeling, finding anomalies, and quality checking annotations."
+          },
+          "response": [
+            {
+              "name": "Similar Windows Found",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"reference_id\": \"window-uuid-1\",\n  \"similar_windows\": [\n    {\n      \"id\": \"window-uuid-42\",\n      \"score\": 0.95,\n      \"session_id\": \"session-uuid\",\n      \"start_time\": 1701423500000,\n      \"end_time\": 1701423500500,\n      \"label\": \"Walking\"\n    },\n    {\n      \"id\": \"window-uuid-87\",\n      \"score\": 0.89,\n      \"session_id\": \"session-uuid\",\n      \"start_time\": 1701424000000,\n      \"end_time\": 1701424000500,\n      \"label\": null\n    }\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
