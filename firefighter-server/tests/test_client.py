@@ -203,15 +203,19 @@ class SimulatedPi:
         print(f"[Simulation] Accel readings sent: {accel_count}")
 
 
-def create_session(server_url: str, session_name: str = None) -> str:
+def create_session(server_url: str, session_name: str = None, activity_type: str = None) -> str:
     """Create a new recording session via REST API."""
     if session_name is None:
         session_name = f"test_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
+    payload = {"name": session_name}
+    if activity_type:
+        payload["activity_type"] = activity_type
+
     try:
         response = requests.post(
             f"{server_url}/api/sessions",
-            json={"name": session_name},
+            json=payload,
             timeout=10
         )
         if response.status_code == 201:
@@ -219,6 +223,8 @@ def create_session(server_url: str, session_name: str = None) -> str:
             return data.get("id")
         else:
             print(f"[Error] Failed to create session: {response.status_code}")
+            if response.text:
+                print(f"[Error] {response.text}")
             return None
     except Exception as e:
         print(f"[Error] Failed to create session: {e}")
@@ -256,6 +262,7 @@ def main():
     parser.add_argument("--duration", type=float, default=10, help="Duration in seconds")
     parser.add_argument("--device-key", default="firefighter_pi_001", help="Device key")
     parser.add_argument("--session-name", default=None, help="Session name (auto-generated if not provided)")
+    parser.add_argument("--activity-type", default="Walking", help="Activity type (Walking, Running, Crawling, etc.)")
     parser.add_argument("--no-auto-session", action="store_true", help="Don't auto-create session")
     args = parser.parse_args()
 
@@ -265,6 +272,7 @@ def main():
     print(f"Server: {args.server}")
     print(f"Device Key: {args.device_key}")
     print(f"Duration: {args.duration}s")
+    print(f"Activity Type: {args.activity_type}")
     print("=" * 50)
 
     session_id = None
@@ -272,9 +280,10 @@ def main():
     # Auto-create session unless disabled
     if not args.no_auto_session:
         print("\n[Setup] Creating session...")
-        session_id = create_session(args.server, args.session_name)
+        session_id = create_session(args.server, args.session_name, args.activity_type)
         if session_id:
             print(f"[Setup] Session created: {session_id}")
+            print(f"[Setup] Activity type: {args.activity_type}")
         else:
             print("[Error] Failed to create session. Data won't be stored!")
             print("[Hint] Use --no-auto-session to skip auto-creation")

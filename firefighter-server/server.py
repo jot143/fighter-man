@@ -46,6 +46,19 @@ vector_store: VectorStore = None
 sessions = {}  # session_id -> session_info
 current_session_id: str = None
 
+# Valid activity types for Stage 1
+ACTIVITY_TYPES = [
+    "Walking",
+    "Running",
+    "Crawling",
+    "Climbing",
+    "Standing",
+    "Kneeling",
+    "Carrying",
+    "Hose_Operation",
+    "Idle",
+]
+
 
 def get_vector_store() -> VectorStore:
     """Get or create vector store instance."""
@@ -106,6 +119,10 @@ def handle_foot_data(data):
         }
     }
     """
+    # Broadcast to UI clients for live display
+    print(f"[Broadcast] foot_data to /iot")
+    socketio.emit("foot_data", data, namespace="/iot")
+
     if not current_session_id:
         return  # No active session
 
@@ -131,6 +148,10 @@ def handle_accel_data(data):
         }
     }
     """
+    # Broadcast to UI clients for live display
+    print(f"[Broadcast] accel_data to /iot")
+    socketio.emit("accel_data", data, namespace="/iot")
+
     if not current_session_id:
         return  # No active session
 
@@ -160,6 +181,16 @@ def health_check():
 
 
 # ============================================================
+# REST API - Activity Types
+# ============================================================
+
+@app.route("/api/activity-types", methods=["GET"])
+def get_activity_types():
+    """Get list of valid activity types for Stage 1."""
+    return jsonify(ACTIVITY_TYPES)
+
+
+# ============================================================
 # REST API - Sessions
 # ============================================================
 
@@ -168,34 +199,48 @@ def create_session():
     """
     Create a new recording session.
 
-    Request body: {"name": "optional session name"}
+    Request body: {
+        "name": "optional session name",
+        "activity_type": "Walking"  # Required for Stage 1
+    }
     """
     global current_session_id
 
     data = request.get_json() or {}
     session_name = data.get("name", f"recording_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    activity_type = data.get("activity_type")
 
-    # Flush any existing session
-    if current_session_id:
+    # Validate activity_type
+    if activity_type and activity_type not in ACTIVITY_TYPES:
+        return jsonify({
+            "error": f"Invalid activity_type. Must be one of: {ACTIVITY_TYPES}"
+        }), 400
+
+    # Stop any existing session before creating new one
+    if current_session_id and current_session_id in sessions:
         store = get_vector_store()
         store.flush_session(current_session_id)
+        sessions[current_session_id]["status"] = "stopped"
+        sessions[current_session_id]["stopped_at"] = datetime.now().isoformat()
+        print(f"[Session] Auto-stopped: {current_session_id}")
 
     # Create new session
     session_id = str(uuid.uuid4())
     sessions[session_id] = {
         "id": session_id,
         "name": session_name,
+        "activity_type": activity_type,
         "created_at": datetime.now().isoformat(),
         "status": "recording",
     }
     current_session_id = session_id
 
-    print(f"[Session] Created: {session_id} ({session_name})")
+    print(f"[Session] Created: {session_id} ({session_name}) - Activity: {activity_type}")
 
     # Notify connected clients
     socketio.emit(
         "session_started",
-        {"session_id": session_id, "name": session_name},
+        {"session_id": session_id, "name": session_name, "activity_type": activity_type},
         namespace="/iot",
     )
 
@@ -206,6 +251,14 @@ def create_session():
 def list_sessions():
     """List all sessions."""
     return jsonify(list(sessions.values()))
+
+
+@app.route("/api/sessions/active", methods=["GET"])
+def get_active_session():
+    """Get the currently active recording session."""
+    if current_session_id and current_session_id in sessions:
+        return jsonify(sessions[current_session_id])
+    return jsonify(None)
 
 
 @app.route("/api/sessions/<session_id>", methods=["GET"])

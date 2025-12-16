@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap"
+        rel="stylesheet">
+    <title>Stage 1 - Training Sessions</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body {
+            background: #0a0a0a;
+            font-family: "Montserrat", sans-serif;
+        }
+
+        .recording-pulse {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .sensor-bar {
+            transition: height 0.1s ease-out;
+        }
+
+        .session-item:hover {
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .session-item.active {
+            background: rgba(59, 130, 246, 0.2);
+            border-left: 3px solid #3b82f6;
+        }
+    </style>
+</head>
+
+<body class="text-gray-200">
+    <div class="flex flex-col h-screen">
+        <!-- Header -->
+        <div class="bg-black border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+            <div>
+                <h1 class="text-xl font-semibold">Stage 1: Training Sessions</h1>
+                <p class="text-sm text-gray-500">Record single-activity sessions for pattern analysis</p>
+            </div>
+            <div class="flex items-center gap-4">
+                <!-- Connection Status -->
+                <div id="connectionStatus" class="flex items-center gap-2 text-sm">
+                    <span class="w-2 h-2 rounded-full bg-gray-500"></span>
+                    <span class="text-gray-500">Disconnected</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="flex flex-1 overflow-hidden">
+            <!-- Left Sidebar - Sessions List -->
+            <div class="w-72 bg-black border-r border-gray-800 flex flex-col">
+                <!-- New Session Controls -->
+                <div class="p-4 border-b border-gray-800">
+                    <div class="mb-3">
+                        <label class="text-xs text-gray-500 mb-1 block">Activity Type</label>
+                        <select id="activityType" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+                            <option value="">Loading...</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="text-xs text-gray-500 mb-1 block">Session Name (optional)</label>
+                        <input type="text" id="sessionName" placeholder="Auto-generated if empty"
+                            class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+                    </div>
+                    <button id="recordBtn" onclick="toggleRecording()"
+                        class="w-full bg-red-600 hover:bg-red-700 text-white font-medium py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors">
+                        <span class="w-3 h-3 rounded-full bg-white"></span>
+                        <span>Start Recording</span>
+                    </button>
+                </div>
+
+                <!-- Sessions List -->
+                <div class="flex-1 overflow-y-auto">
+                    <div class="px-4 py-3 text-xs text-gray-500 font-medium border-b border-gray-800">
+                        PAST SESSIONS
+                    </div>
+                    <div id="sessionsList" class="divide-y divide-gray-800">
+                        <!-- Sessions will be loaded here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Center - Recording Info / Video Placeholder -->
+            <div class="flex-1 flex flex-col bg-gradient-to-b from-gray-900 to-black">
+                <div class="flex-1 flex items-center justify-center p-8">
+                    <div id="centerContent" class="text-center">
+                        <!-- Idle State -->
+                        <div id="idleState">
+                            <div class="text-6xl mb-4">🎯</div>
+                            <h2 class="text-2xl font-semibold mb-2">Ready to Record</h2>
+                            <p class="text-gray-500 max-w-md">Select an activity type and click "Start Recording" to begin capturing sensor data.</p>
+                        </div>
+
+                        <!-- Recording State -->
+                        <div id="recordingState" class="hidden">
+                            <div class="recording-pulse text-6xl mb-4">🔴</div>
+                            <h2 class="text-2xl font-semibold mb-2">Recording...</h2>
+                            <div id="currentActivity" class="text-xl text-blue-400 mb-4">Walking</div>
+                            <div class="flex items-center justify-center gap-8 text-sm text-gray-400">
+                                <div>
+                                    <span class="text-2xl font-mono text-white" id="recordingDuration">00:00</span>
+                                    <div class="text-xs">Duration</div>
+                                </div>
+                                <div>
+                                    <span class="text-2xl font-mono text-green-400" id="footCount">0</span>
+                                    <div class="text-xs">Foot Readings</div>
+                                </div>
+                                <div>
+                                    <span class="text-2xl font-mono text-orange-400" id="accelCount">0</span>
+                                    <div class="text-xs">Accel Readings</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Replay State -->
+                        <div id="replayState" class="hidden">
+                            <div class="text-6xl mb-4">▶️</div>
+                            <h2 class="text-2xl font-semibold mb-2">Replay Mode</h2>
+                            <div id="replaySession" class="text-xl text-blue-400 mb-4"></div>
+                            <div class="flex items-center justify-center gap-4">
+                                <button onclick="replayControl('prev')" class="p-2 bg-gray-800 rounded hover:bg-gray-700">⏮</button>
+                                <button onclick="replayControl('play')" id="playPauseBtn" class="p-3 bg-blue-600 rounded hover:bg-blue-700">▶</button>
+                                <button onclick="replayControl('next')" class="p-2 bg-gray-800 rounded hover:bg-gray-700">⏭</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Sidebar - Live Sensor Data -->
+            <div class="w-80 bg-black border-l border-gray-800 overflow-y-auto">
+                <div class="p-6 space-y-6">
+                    <!-- Foot Pressure -->
+                    <div>
+                        <h3 class="text-sm font-semibold mb-4 tracking-wide flex items-center justify-between">
+                            FOOT PRESSURE
+                            <span id="footStatus" class="text-xs text-gray-500 font-normal">Waiting...</span>
+                        </h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <!-- Left Foot -->
+                            <div class="bg-gray-900 rounded-lg p-3">
+                                <div class="text-xs text-gray-500 mb-2">LEFT</div>
+                                <div id="leftFootBars" class="flex items-end justify-around h-24 gap-0.5">
+                                    <!-- 18 bars for left foot sensors -->
+                                </div>
+                                <div class="mt-2 text-xs text-gray-400 flex justify-between">
+                                    <span>Max: <span id="leftMax">0</span></span>
+                                    <span>Avg: <span id="leftAvg">0</span></span>
+                                </div>
+                            </div>
+                            <!-- Right Foot -->
+                            <div class="bg-gray-900 rounded-lg p-3">
+                                <div class="text-xs text-gray-500 mb-2">RIGHT</div>
+                                <div id="rightFootBars" class="flex items-end justify-around h-24 gap-0.5">
+                                    <!-- 18 bars for right foot sensors -->
+                                </div>
+                                <div class="mt-2 text-xs text-gray-400 flex justify-between">
+                                    <span>Max: <span id="rightMax">0</span></span>
+                                    <span>Avg: <span id="rightAvg">0</span></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Accelerometer -->
+                    <div>
+                        <h3 class="text-sm font-semibold mb-4 tracking-wide flex items-center justify-between">
+                            ACCELEROMETER
+                            <span id="accelStatus" class="text-xs text-gray-500 font-normal">Waiting...</span>
+                        </h3>
+
+                        <!-- Acceleration -->
+                        <div class="mb-4">
+                            <div class="text-xs text-gray-500 mb-2">Acceleration (m/s²)</div>
+                            <div class="grid grid-cols-3 gap-2">
+                                <div class="bg-gray-900 rounded p-2 text-center">
+                                    <div class="text-xs text-blue-400">X</div>
+                                    <div id="accX" class="text-lg font-mono">0.00</div>
+                                </div>
+                                <div class="bg-gray-900 rounded p-2 text-center">
+                                    <div class="text-xs text-green-400">Y</div>
+                                    <div id="accY" class="text-lg font-mono">0.00</div>
+                                </div>
+                                <div class="bg-gray-900 rounded p-2 text-center">
+                                    <div class="text-xs text-orange-400">Z</div>
+                                    <div id="accZ" class="text-lg font-mono">0.00</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Gyroscope -->
+                        <div class="mb-4">
+                            <div class="text-xs text-gray-500 mb-2">Gyroscope (°/s)</div>
+                            <div class="grid grid-cols-3 gap-2">
+                                <div class="bg-gray-900 rounded p-2 text-center">
+                                    <div class="text-xs text-blue-400">X</div>
+                                    <div id="gyroX" class="text-lg font-mono">0.00</div>
+                                </div>
+                                <div class="bg-gray-900 rounded p-2 text-center">
+                                    <div class="text-xs text-green-400">Y</div>
+                                    <div id="gyroY" class="text-lg font-mono">0.00</div>
+                                </div>
+                                <div class="bg-gray-900 rounded p-2 text-center">
+                                    <div class="text-xs text-orange-400">Z</div>
+                                    <div id="gyroZ" class="text-lg font-mono">0.00</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Angle -->
+                        <div>
+                            <div class="text-xs text-gray-500 mb-2">Angle (°)</div>
+                            <div class="grid grid-cols-3 gap-2">
+                                <div class="bg-gray-900 rounded p-2 text-center">
+                                    <div class="text-xs text-purple-400">Roll</div>
+                                    <div id="roll" class="text-lg font-mono">0.00</div>
+                                </div>
+                                <div class="bg-gray-900 rounded p-2 text-center">
+                                    <div class="text-xs text-pink-400">Pitch</div>
+                                    <div id="pitch" class="text-lg font-mono">0.00</div>
+                                </div>
+                                <div class="bg-gray-900 rounded p-2 text-center">
+                                    <div class="text-xs text-cyan-400">Yaw</div>
+                                    <div id="yaw" class="text-lg font-mono">0.00</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Timeline Section -->
+        <div class="bg-[#0b0b0b] border-t border-gray-800 text-gray-300 w-full">
+            <!-- Timeline Header -->
+            <div class="bg-gray-900 px-4 py-2 flex items-center gap-3 border-b border-gray-700">
+                <span class="text-sm font-medium">Timeline</span>
+                <div class="flex-1"></div>
+                <div id="timelineRange" class="text-gray-400 text-sm font-mono">00:00 — 00:00</div>
+                <div class="flex-1"></div>
+                <button onclick="zoomTimeline(-1)" class="p-1.5 hover:bg-gray-700 rounded text-gray-300">−</button>
+                <button onclick="zoomTimeline(1)" class="p-1.5 hover:bg-gray-700 rounded text-gray-300">+</button>
+            </div>
+
+            <!-- Timeline Container -->
+            <div class="flex w-full">
+                <!-- Track Labels -->
+                <div class="w-32 bg-gray-850 border-r border-gray-700">
+                    <div class="h-8 border-b border-gray-700 flex items-center px-3">
+                        <span class="text-[10px] text-gray-400">Time</span>
+                    </div>
+                    <div class="h-10 border-b border-gray-700 flex items-center px-3 bg-gray-800">
+                        <span class="text-xs text-gray-300">Foot</span>
+                    </div>
+                    <div class="h-10 border-b border-gray-700 flex items-center px-3 bg-gray-800">
+                        <span class="text-xs text-gray-300">Accel</span>
+                    </div>
+                </div>
+
+                <!-- Timeline Area -->
+                <div class="flex-1 overflow-x-auto" id="timelineScroll">
+                    <!-- Ruler -->
+                    <div id="timelineRuler" class="h-8 bg-gray-900 border-b border-gray-700 relative">
+                        <!-- Time markers will be generated dynamically -->
+                    </div>
+
+                    <!-- Foot Track -->
+                    <div id="footTrack" class="h-10 bg-gray-800 border-b border-gray-700 relative">
+                        <!-- Foot data markers will appear here -->
+                    </div>
+
+                    <!-- Accel Track -->
+                    <div id="accelTrack" class="h-10 bg-gray-800 border-b border-gray-700 relative">
+                        <!-- Accel data markers will appear here -->
+                    </div>
+
+                    <!-- Playhead -->
+                    <div id="playhead" class="absolute top-0 w-0.5 h-full bg-red-500 z-10 hidden" style="left: 0;">
+                        <div class="absolute -top-1 -left-1.5 w-3 h-2 bg-red-500"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const SERVER_URL = 'http://localhost:4100';
+
+        // State
+        let isRecording = false;
+        let currentSessionId = null;
+        let recordingStartTime = null;
+        let recordingTimer = null;
+        let footReadingCount = 0;
+        let accelReadingCount = 0;
+        let sessions = [];
+        let replayData = null;
+        let isReplaying = false;
+        let replayIndex = 0;
+        let replayTimer = null;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            initFootBars();
+            loadActivityTypes();
+            loadSessions();
+            connectSocket();
+            checkActiveSession();
+        });
+
+        // Check if there's an active session on the server and sync UI state
+        async function checkActiveSession() {
+            // Don't run if already recording
+            if (isRecording) return;
+
+            try {
+                const response = await fetch(`${SERVER_URL}/api/sessions/active`);
+                const session = await response.json();
+
+                if (session && session.status === 'recording') {
+                    // Restore recording state from server
+                    currentSessionId = session.id;
+                    isRecording = true;
+                    recordingStartTime = new Date(session.created_at).getTime();
+                    updateRecordingUI(true, session.activity_type);
+                    startRecordingTimer();
+                    console.log('[Session] Restored active session:', session.id);
+                }
+            } catch (error) {
+                console.error('Failed to check active session:', error);
+            }
+        }
+
+        // Initialize foot pressure bars
+        function initFootBars() {
+            const leftBars = document.getElementById('leftFootBars');
+            const rightBars = document.getElementById('rightFootBars');
+
+            for (let i = 0; i < 18; i++) {
+                leftBars.innerHTML += `<div class="w-1 bg-blue-500 sensor-bar" style="height: 5%"></div>`;
+                rightBars.innerHTML += `<div class="w-1 bg-green-500 sensor-bar" style="height: 5%"></div>`;
+            }
+        }
+
+        // Load activity types from API
+        async function loadActivityTypes() {
+            try {
+                const response = await fetch(`${SERVER_URL}/api/activity-types`);
+                const types = await response.json();
+
+                const select = document.getElementById('activityType');
+                select.innerHTML = types.map(t => `<option value="${t}">${t}</option>`).join('');
+            } catch (error) {
+                console.error('Failed to load activity types:', error);
+                document.getElementById('activityType').innerHTML = '<option value="Walking">Walking</option>';
+            }
+        }
+
+        // Load sessions from API
+        async function loadSessions() {
+            try {
+                const response = await fetch(`${SERVER_URL}/api/sessions`);
+                sessions = await response.json();
+                renderSessions();
+            } catch (error) {
+                console.error('Failed to load sessions:', error);
+            }
+        }
+
+        // Render sessions list
+        function renderSessions() {
+            const list = document.getElementById('sessionsList');
+
+            if (sessions.length === 0) {
+                list.innerHTML = '<div class="p-4 text-gray-500 text-sm">No sessions yet</div>';
+                return;
+            }
+
+            list.innerHTML = sessions.map(s => `
+                <div class="session-item px-4 py-3 cursor-pointer hover:bg-gray-900 transition-colors"
+                     onclick="selectSession('${s.id}')">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="font-medium text-sm">${s.name || 'Unnamed'}</span>
+                        <span class="text-xs px-2 py-0.5 rounded ${s.status === 'recording' ? 'bg-red-900 text-red-300' : 'bg-gray-700 text-gray-400'}">
+                            ${s.status}
+                        </span>
+                    </div>
+                    <div class="flex items-center gap-2 text-xs text-gray-500">
+                        <span class="bg-blue-900 text-blue-300 px-1.5 py-0.5 rounded">${s.activity_type || 'Unknown'}</span>
+                        <span>${new Date(s.created_at).toLocaleTimeString()}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Throttle function to prevent rapid calls
+        function throttle(func, limit) {
+            let inThrottle;
+            return function(...args) {
+                if (!inThrottle) {
+                    func.apply(this, args);
+                    inThrottle = true;
+                    setTimeout(() => inThrottle = false, limit);
+                }
+            }
+        }
+
+        // Throttled version of loadSessions
+        const throttledLoadSessions = throttle(loadSessions, 2000);
+
+        // Connect to Socket.IO
+        function connectSocket() {
+            // Connect to /iot namespace only
+            const iotSocket = io(`${SERVER_URL}/iot`, {
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000
+            });
+
+            iotSocket.on('connect', () => {
+                updateConnectionStatus(true);
+                console.log('[Socket.IO] Connected to /iot namespace');
+            });
+
+            iotSocket.on('disconnect', (reason) => {
+                updateConnectionStatus(false);
+                console.log('[Socket.IO] Disconnected:', reason);
+            });
+
+            iotSocket.on('connect_error', (error) => {
+                console.error('[Socket.IO] Connection error:', error);
+                updateConnectionStatus(false);
+            });
+
+            // Listen for session events (throttled to prevent rapid updates)
+            iotSocket.on('session_started', (data) => {
+                console.log('[Socket.IO] Session started:', data);
+                throttledLoadSessions();
+            });
+
+            iotSocket.on('session_stopped', (data) => {
+                console.log('[Socket.IO] Session stopped:', data);
+                throttledLoadSessions();
+            });
+
+            // Listen for live sensor data (no logging - too frequent at 30Hz)
+            iotSocket.on('foot_data', (data) => {
+                updateFootDisplay(data);
+            });
+
+            iotSocket.on('accel_data', (data) => {
+                updateAccelDisplay(data);
+            });
+
+            // Store socket for later use
+            window.iotSocket = iotSocket;
+        }
+
+        // Update connection status indicator
+        function updateConnectionStatus(connected) {
+            const status = document.getElementById('connectionStatus');
+            if (connected) {
+                status.innerHTML = `
+                    <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                    <span class="text-green-500">Connected</span>
+                `;
+            } else {
+                status.innerHTML = `
+                    <span class="w-2 h-2 rounded-full bg-gray-500"></span>
+                    <span class="text-gray-500">Disconnected</span>
+                `;
+            }
+        }
+
+        // Toggle recording
+        async function toggleRecording() {
+            if (isRecording) {
+                await stopRecording();
+            } else {
+                await startRecording();
+            }
+        }
+
+        // Start recording
+        async function startRecording() {
+            const activityType = document.getElementById('activityType').value;
+            const sessionName = document.getElementById('sessionName').value;
+
+            if (!activityType) {
+                alert('Please select an activity type');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${SERVER_URL}/api/sessions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: sessionName || undefined,
+                        activity_type: activityType
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to create session');
+                }
+
+                const session = await response.json();
+                currentSessionId = session.id;
+                isRecording = true;
+                recordingStartTime = Date.now();
+                footReadingCount = 0;
+                accelReadingCount = 0;
+
+                // Update UI
+                updateRecordingUI(true, activityType);
+                startRecordingTimer();
+                // Don't call loadSessions() here - socket event will handle it
+
+                console.log('Recording started:', session);
+            } catch (error) {
+                console.error('Failed to start recording:', error);
+                alert('Failed to start recording: ' + error.message);
+            }
+        }
+
+        // Stop recording
+        async function stopRecording() {
+            if (!currentSessionId) return;
+
+            try {
+                const response = await fetch(`${SERVER_URL}/api/sessions/${currentSessionId}/stop`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to stop session');
+                }
+
+                isRecording = false;
+                stopRecordingTimer();
+                updateRecordingUI(false);
+                // Don't call loadSessions() here - socket event will handle it
+
+                console.log('Recording stopped');
+                currentSessionId = null;
+            } catch (error) {
+                console.error('Failed to stop recording:', error);
+                alert('Failed to stop recording: ' + error.message);
+            }
+        }
+
+        // Update recording UI
+        function updateRecordingUI(recording, activityType = '') {
+            const btn = document.getElementById('recordBtn');
+            const idleState = document.getElementById('idleState');
+            const recordingState = document.getElementById('recordingState');
+            const replayState = document.getElementById('replayState');
+
+            if (recording) {
+                btn.innerHTML = `
+                    <span class="w-3 h-3 rounded bg-white"></span>
+                    <span>Stop Recording</span>
+                `;
+                btn.className = btn.className.replace('bg-red-600 hover:bg-red-700', 'bg-gray-600 hover:bg-gray-700');
+
+                idleState.classList.add('hidden');
+                replayState.classList.add('hidden');
+                recordingState.classList.remove('hidden');
+                document.getElementById('currentActivity').textContent = activityType;
+            } else {
+                btn.innerHTML = `
+                    <span class="w-3 h-3 rounded-full bg-white"></span>
+                    <span>Start Recording</span>
+                `;
+                btn.className = btn.className.replace('bg-gray-600 hover:bg-gray-700', 'bg-red-600 hover:bg-red-700');
+
+                idleState.classList.remove('hidden');
+                recordingState.classList.add('hidden');
+                replayState.classList.add('hidden');
+            }
+        }
+
+        // Recording timer
+        function startRecordingTimer() {
+            // Prevent multiple timers
+            if (recordingTimer) {
+                clearInterval(recordingTimer);
+            }
+            recordingTimer = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+                const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
+                const seconds = (elapsed % 60).toString().padStart(2, '0');
+                document.getElementById('recordingDuration').textContent = `${minutes}:${seconds}`;
+            }, 1000);
+        }
+
+        function stopRecordingTimer() {
+            if (recordingTimer) {
+                clearInterval(recordingTimer);
+                recordingTimer = null;
+            }
+        }
+
+        // Update sensor displays (called when receiving data)
+        function updateFootDisplay(data) {
+            if (!data || !data.data) return;
+
+            const foot = data.data.foot || 'LEFT';
+            const values = data.data.values || [];
+            const max = data.data.max || 0;
+            const avg = data.data.avg || 0;
+
+            const barsContainer = document.getElementById(foot === 'LEFT' ? 'leftFootBars' : 'rightFootBars');
+            const bars = barsContainer.querySelectorAll('.sensor-bar');
+
+            values.forEach((val, i) => {
+                if (bars[i]) {
+                    const height = Math.min(100, Math.max(5, (val / 100) * 100));
+                    bars[i].style.height = `${height}%`;
+                }
+            });
+
+            document.getElementById(foot === 'LEFT' ? 'leftMax' : 'rightMax').textContent = max.toFixed(1);
+            document.getElementById(foot === 'LEFT' ? 'leftAvg' : 'rightAvg').textContent = avg.toFixed(1);
+
+            document.getElementById('footStatus').textContent = new Date().toLocaleTimeString();
+
+            // Always increment counts when we're in recording state
+            // This tracks data received while UI is recording
+            if (isRecording) {
+                footReadingCount++;
+                document.getElementById('footCount').textContent = footReadingCount;
+            }
+        }
+
+        function updateAccelDisplay(data) {
+            if (!data || !data.data) return;
+
+            const acc = data.data.acc || {};
+            const gyro = data.data.gyro || {};
+            const angle = data.data.angle || {};
+
+            document.getElementById('accX').textContent = (acc.x || 0).toFixed(2);
+            document.getElementById('accY').textContent = (acc.y || 0).toFixed(2);
+            document.getElementById('accZ').textContent = (acc.z || 0).toFixed(2);
+
+            document.getElementById('gyroX').textContent = (gyro.x || 0).toFixed(2);
+            document.getElementById('gyroY').textContent = (gyro.y || 0).toFixed(2);
+            document.getElementById('gyroZ').textContent = (gyro.z || 0).toFixed(2);
+
+            document.getElementById('roll').textContent = (angle.roll || 0).toFixed(2);
+            document.getElementById('pitch').textContent = (angle.pitch || 0).toFixed(2);
+            document.getElementById('yaw').textContent = (angle.yaw || 0).toFixed(2);
+
+            document.getElementById('accelStatus').textContent = new Date().toLocaleTimeString();
+
+            // Always increment counts when we're in recording state
+            if (isRecording) {
+                accelReadingCount++;
+                document.getElementById('accelCount').textContent = accelReadingCount;
+            }
+        }
+
+        // Select session for replay
+        async function selectSession(sessionId) {
+            if (isRecording) {
+                alert('Stop recording before selecting a session');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${SERVER_URL}/api/sessions/${sessionId}`);
+                const session = await response.json();
+
+                // Update UI
+                document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+                event.currentTarget?.classList.add('active');
+
+                // Show replay state
+                document.getElementById('idleState').classList.add('hidden');
+                document.getElementById('recordingState').classList.add('hidden');
+                document.getElementById('replayState').classList.remove('hidden');
+                document.getElementById('replaySession').textContent = `${session.name} - ${session.activity_type}`;
+
+                // Load session data for replay
+                replayData = session;
+                replayIndex = 0;
+                updateTimeline(session);
+
+                console.log('Selected session:', session);
+            } catch (error) {
+                console.error('Failed to load session:', error);
+            }
+        }
+
+        // Update timeline with session data
+        function updateTimeline(session) {
+            const windows = session.windows || [];
+            if (windows.length === 0) {
+                document.getElementById('timelineRange').textContent = '00:00 — 00:00';
+                return;
+            }
+
+            const startTime = new Date(windows[0]?.start_time || session.created_at);
+            const endTime = new Date(windows[windows.length - 1]?.end_time || session.stopped_at || session.created_at);
+            const duration = (endTime - startTime) / 1000;
+
+            // Update time range display
+            const formatTime = (seconds) => {
+                const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+                const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+                return `${m}:${s}`;
+            };
+
+            document.getElementById('timelineRange').textContent = `${formatTime(0)} — ${formatTime(duration)}`;
+
+            // Generate timeline markers
+            const ruler = document.getElementById('timelineRuler');
+            const footTrack = document.getElementById('footTrack');
+            const accelTrack = document.getElementById('accelTrack');
+
+            // Clear existing content
+            ruler.innerHTML = '';
+            footTrack.innerHTML = '';
+            accelTrack.innerHTML = '';
+
+            // Generate time markers (every 10 seconds)
+            const markerCount = Math.ceil(duration / 10) + 1;
+            for (let i = 0; i < markerCount; i++) {
+                const marker = document.createElement('div');
+                marker.className = 'absolute flex items-center justify-center border-r border-gray-600 h-full';
+                marker.style.left = `${(i * 10 / duration) * 100}%`;
+                marker.style.width = `${(10 / duration) * 100}%`;
+                marker.innerHTML = `<span class="text-[10px] text-gray-400">${formatTime(i * 10)}</span>`;
+                ruler.appendChild(marker);
+            }
+
+            // Add window markers on tracks
+            windows.forEach((window, idx) => {
+                const windowStart = (new Date(window.start_time) - startTime) / 1000;
+                const left = (windowStart / duration) * 100;
+
+                if (window.foot_count > 0) {
+                    const marker = document.createElement('div');
+                    marker.className = 'absolute top-1 h-8 bg-blue-600 rounded opacity-70';
+                    marker.style.left = `${left}%`;
+                    marker.style.width = '4px';
+                    marker.title = `Foot: ${window.foot_count} readings`;
+                    footTrack.appendChild(marker);
+                }
+
+                if (window.accel_count > 0) {
+                    const marker = document.createElement('div');
+                    marker.className = 'absolute top-1 h-8 bg-orange-600 rounded opacity-70';
+                    marker.style.left = `${left}%`;
+                    marker.style.width = '4px';
+                    marker.title = `Accel: ${window.accel_count} readings`;
+                    accelTrack.appendChild(marker);
+                }
+            });
+        }
+
+        // Replay controls
+        function replayControl(action) {
+            if (!replayData) return;
+
+            switch (action) {
+                case 'play':
+                    if (isReplaying) {
+                        pauseReplay();
+                    } else {
+                        startReplay();
+                    }
+                    break;
+                case 'prev':
+                    replayIndex = Math.max(0, replayIndex - 1);
+                    break;
+                case 'next':
+                    replayIndex = Math.min((replayData.windows?.length || 1) - 1, replayIndex + 1);
+                    break;
+            }
+        }
+
+        function startReplay() {
+            isReplaying = true;
+            document.getElementById('playPauseBtn').textContent = '⏸';
+            // Implement replay logic here
+        }
+
+        function pauseReplay() {
+            isReplaying = false;
+            document.getElementById('playPauseBtn').textContent = '▶';
+            if (replayTimer) {
+                clearInterval(replayTimer);
+                replayTimer = null;
+            }
+        }
+
+        // Timeline zoom
+        function zoomTimeline(direction) {
+            // Implement zoom functionality
+            console.log('Zoom:', direction > 0 ? 'in' : 'out');
+        }
+
+        // Simulate receiving sensor data (for testing without actual sensors)
+        function simulateSensorData() {
+            setInterval(() => {
+                if (isRecording) {
+                    // Simulate foot data
+                    updateFootDisplay({
+                        data: {
+                            foot: Math.random() > 0.5 ? 'LEFT' : 'RIGHT',
+                            values: Array(18).fill(0).map(() => Math.random() * 100),
+                            max: Math.random() * 100,
+                            avg: Math.random() * 50
+                        }
+                    });
+
+                    // Simulate accel data
+                    updateAccelDisplay({
+                        data: {
+                            acc: { x: (Math.random() - 0.5) * 2, y: (Math.random() - 0.5) * 2, z: 9.8 + Math.random() },
+                            gyro: { x: Math.random() * 10, y: Math.random() * 10, z: Math.random() * 10 },
+                            angle: { roll: Math.random() * 10, pitch: Math.random() * 10, yaw: Math.random() * 360 }
+                        }
+                    });
+                }
+            }, 100);
+        }
+
+        // Uncomment to test without actual sensors:
+        // simulateSensorData();
+    </script>
+</body>
+
+</html>
