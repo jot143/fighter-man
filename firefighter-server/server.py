@@ -58,6 +58,7 @@ ACTIVITY_TYPES = [
     "Climbing",
     "Standing",
     "Kneeling",
+    "Sitting",
     "Carrying",
     "Hose_Operation",
     "Idle",

@@ -179,6 +179,7 @@ The system is designed to capture and label these firefighter activities:
 | Climbing       | Ladder ascent/descent        |
 | Standing       | Stationary, upright          |
 | Kneeling       | One or both knees down       |
+| Sitting        | Seated with minimal foot contact |
 | Carrying       | Carrying equipment/person    |
 | Hose_Operation | Using fire hose              |
 | Idle           | No activity / rest           |

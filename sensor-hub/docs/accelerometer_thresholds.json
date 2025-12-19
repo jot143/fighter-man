@@ -1,0 +1,236 @@
+{
+  "_note": "IMPORTANT: Thresholds from archived/accelerator/blue/analyze.py assume Y-axis=vertical. See THRESHOLD_SOURCES.md for details.",
+  "_axis_orientation": "Y-axis is vertical when standing (acc.y ≈ 1.0g)",
+  "_activities_included": "Only validated activities from archived script are included. Additional activities require real-world testing.",
+
+  "Sitting": {
+    "description": "Moderate pitch with lower vertical acceleration (validated)",
+    "acc": {
+      "x_range": [-2.0, 2.0],
+      "y_range": [0.5, 0.9],
+      "z_range": [-2.0, 2.0],
+      "magnitude_range": [0.7, 1.2]
+    },
+    "gyro": {
+      "x_range": [-20, 20],
+      "y_range": [-20, 20],
+      "z_range": [-20, 20],
+      "magnitude_max": 20
+    },
+    "angle": {
+      "pitch_range": [15, 45],
+      "roll_range": [-30, 30],
+      "yaw_range": "any"
+    },
+    "orientation": {
+      "is_horizontal": false,
+      "is_upright": false,
+      "is_sitting": true
+    },
+    "movement": {
+      "variance_max": 0.3,
+      "stability_time_seconds": 2.0
+    },
+    "source": "archived/accelerator/blue/analyze.py lines 60-64",
+    "validation_status": "tested",
+    "confidence_indicators": {
+      "strong": "pitch IN [15, 45] AND acc_y IN [0.5, 0.9] AND stable_for_2s",
+      "moderate": "pitch IN [15, 45] AND acc_y < 0.9",
+      "weak": "acc_y < 0.9"
+    }
+  },
+
+  "Standing": {
+    "description": "Upright with gravity on Y-axis (validated)",
+    "acc": {
+      "x_range": [-0.5, 0.5],
+      "y_range": [0.85, 1.15],
+      "z_range": [-0.5, 0.5],
+      "magnitude_range": [0.9, 1.2]
+    },
+    "gyro": {
+      "x_range": [-50, 50],
+      "y_range": [-50, 50],
+      "z_range": [-50, 50],
+      "magnitude_max": 50
+    },
+    "angle": {
+      "pitch_range": [-15, 15],
+      "roll_range": [-15, 15],
+      "yaw_range": "any"
+    },
+    "orientation": {
+      "is_horizontal": false,
+      "is_upright": true,
+      "is_sitting": false
+    },
+    "movement": {
+      "variance_max": 0.2
+    },
+    "source": "archived/accelerator/blue/analyze.py lines 50-53",
+    "validation_status": "tested",
+    "confidence_indicators": {
+      "strong": "acc_y IN [0.9, 1.1] AND pitch < 10 AND gyro_mag < 30",
+      "moderate": "acc_y IN [0.85, 1.15] AND pitch < 15",
+      "weak": "acc_y > 0.85"
+    }
+  },
+
+  "Bent_Forward": {
+    "description": "Forward bend with high pitch (validated)",
+    "acc": {
+      "x_range": [-1.0, 1.0],
+      "y_range": [0.0, 0.7],
+      "z_range": [-1.0, 1.0],
+      "magnitude_range": [0.5, 1.2]
+    },
+    "gyro": {
+      "x_range": [-50, 50],
+      "y_range": [-50, 50],
+      "z_range": [-50, 50],
+      "magnitude_max": 50
+    },
+    "angle": {
+      "pitch_range": [30, 90],
+      "roll_range": [-30, 30],
+      "yaw_range": "any"
+    },
+    "orientation": {
+      "is_horizontal": false,
+      "is_upright": false,
+      "is_bent": true
+    },
+    "movement": {
+      "variance_max": 0.5
+    },
+    "source": "archived/accelerator/blue/analyze.py lines 56-57",
+    "validation_status": "tested",
+    "confidence_indicators": {
+      "strong": "pitch > 45 AND acc_y < 0.6",
+      "moderate": "pitch > 30 AND acc_y < 0.7",
+      "weak": "pitch > 30"
+    }
+  },
+
+  "Lying_Down": {
+    "description": "Horizontal orientation, gravity on X or Z (validated)",
+    "acc": {
+      "x_range": [-1.1, 1.1],
+      "y_range": [-0.3, 0.3],
+      "z_range": [-1.1, 1.1],
+      "magnitude_range": [0.8, 1.2]
+    },
+    "gyro": {
+      "x_range": [-30, 30],
+      "y_range": [-30, 30],
+      "z_range": [-30, 30],
+      "magnitude_max": 30
+    },
+    "angle": {
+      "pitch_range": [-100, -70, 70, 100],
+      "roll_range": [-100, -70, 70, 100],
+      "yaw_range": "any"
+    },
+    "orientation": {
+      "is_horizontal": true,
+      "is_upright": false,
+      "is_lying": true
+    },
+    "movement": {
+      "variance_max": 0.2
+    },
+    "source": "archived/accelerator/blue/analyze.py lines 67-68",
+    "validation_status": "tested",
+    "confidence_indicators": {
+      "strong": "abs(acc_y) < 0.2 AND (abs(acc_x) > 0.8 OR abs(acc_z) > 0.8)",
+      "moderate": "abs(acc_y) < 0.3 AND (abs(acc_x) > 0.7 OR abs(acc_z) > 0.7)",
+      "weak": "abs(acc_y) < 0.3"
+    }
+  },
+
+  "Jumping": {
+    "description": "Rapid Y-axis acceleration spikes (validated)",
+    "acc": {
+      "x_range": [-2.0, 2.0],
+      "y_range": [0.6, 1.5],
+      "z_range": [-2.0, 2.0],
+      "magnitude_range": [0.8, 1.8]
+    },
+    "gyro": {
+      "x_range": [-150, 150],
+      "y_range": [-150, 150],
+      "z_range": [-150, 150],
+      "magnitude_min": 100
+    },
+    "angle": {
+      "pitch_range": "any",
+      "roll_range": "any",
+      "yaw_range": "any"
+    },
+    "orientation": {
+      "is_horizontal": false,
+      "is_upright": false,
+      "is_jumping": true
+    },
+    "movement": {
+      "spike_high": 1.3,
+      "spike_low": 0.6,
+      "cooldown_seconds": 1.0
+    },
+    "source": "archived/accelerator/blue/analyze.py lines 71-74",
+    "validation_status": "tested",
+    "confidence_indicators": {
+      "strong": "(acc_y > 1.3 OR acc_y < 0.6) AND gyro_mag > 100",
+      "moderate": "(acc_y > 1.2 OR acc_y < 0.7) AND gyro_mag > 80",
+      "weak": "gyro_mag > 100"
+    }
+  },
+
+  "_metadata": {
+    "version": "2.0",
+    "revision_date": "2025-12-19",
+    "sensor_model": "WT901BLE67",
+    "activities_count": 5,
+    "activities_list": ["Sitting", "Standing", "Bent_Forward", "Lying_Down", "Jumping"],
+    "units": {
+      "acceleration": "g (gravity, where 1g = 9.81 m/s²)",
+      "gyroscope": "degrees per second (°/s)",
+      "angle": "degrees (°)",
+      "magnitude": "euclidean norm of x,y,z components"
+    },
+    "coordinate_system": {
+      "note": "IMPORTANT: Y-axis is VERTICAL when standing (from archived script)",
+      "y_axis": "vertical (down -/ up +) when standing upright",
+      "x_axis": "left (-) / right (+)",
+      "z_axis": "backward (-) / forward (+)",
+      "roll": "rotation around X (sideways tilt)",
+      "pitch": "rotation around Y (forward/backward tilt)",
+      "yaw": "rotation around Z (compass heading)"
+    },
+    "validation_status": "All 5 activities have been tested and validated with the archived live detection script",
+    "source_reference": {
+      "primary": "archived/accelerator/blue/analyze.py (lines 46-78)",
+      "live_script": "archived/accelerator/blue/live.py",
+      "documentation": "docs/THRESHOLD_SOURCES.md"
+    },
+    "usage_notes": [
+      "Only TESTED activities are included (Standing, Sitting, Bent_Forward, Lying_Down, Jumping)",
+      "Additional activities (Walking, Running, Crawling, Climbing, Kneeling, Carrying, Hose_Operation, Idle) require real-world testing",
+      "Y-axis is VERTICAL when standing - verify sensor orientation before deployment",
+      "Check multiple consecutive readings (>500ms) before confirming activity",
+      "Use confidence_indicators to score detection quality",
+      "Combine with foot pressure data for best accuracy when available",
+      "See THRESHOLD_SOURCES.md for detailed explanation and testing recommendations"
+    ],
+    "future_activities": [
+      "Walking - needs testing",
+      "Running - needs testing",
+      "Crawling - needs testing",
+      "Climbing - needs testing",
+      "Kneeling - needs testing",
+      "Carrying - needs testing",
+      "Hose_Operation - needs testing",
+      "Idle - needs testing"
+    ]
+  }
+}

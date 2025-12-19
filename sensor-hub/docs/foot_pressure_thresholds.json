@@ -1,0 +1,165 @@
+{
+  "Sitting": {
+    "description": "Minimal foot contact - most weight on seat",
+    "avg_range": [0, 80],
+    "max_range": [0, 150],
+    "active_count_range": [0, 6],
+    "variance_range": [0, 30],
+    "left_right_asymmetry_max": 40,
+    "pattern": "minimal",
+    "confidence_indicators": {
+      "strong": "avg < 50 AND active_count < 4",
+      "moderate": "avg < 80 AND variance < 30",
+      "weak": "active_count < 8"
+    }
+  },
+  "Standing": {
+    "description": "Constant balanced pressure on both feet",
+    "avg_range": [100, 200],
+    "max_range": [150, 300],
+    "active_count_range": [12, 18],
+    "variance_range": [0, 40],
+    "left_right_asymmetry_max": 50,
+    "pattern": "constant",
+    "confidence_indicators": {
+      "strong": "variance < 20 AND abs(left_avg - right_avg) < 30",
+      "moderate": "avg > 100 AND active_count > 12",
+      "weak": "variance < 40"
+    }
+  },
+  "Walking": {
+    "description": "Regular alternating heel-toe gait pattern",
+    "avg_range": [80, 300],
+    "max_range": [200, 500],
+    "active_count_range": [8, 18],
+    "variance_range": [50, 200],
+    "left_right_asymmetry_max": 100,
+    "pattern": "alternating",
+    "step_frequency_hz": [1.0, 2.0],
+    "confidence_indicators": {
+      "strong": "variance > 80 AND step_frequency IN [1.0, 2.0]",
+      "moderate": "avg IN [100, 250] AND active_count > 10",
+      "weak": "variance > 50"
+    }
+  },
+  "Running": {
+    "description": "Rapid high-pressure heel strikes",
+    "avg_range": [150, 500],
+    "max_range": [400, 800],
+    "active_count_range": [10, 18],
+    "variance_range": [200, 500],
+    "left_right_asymmetry_max": 150,
+    "pattern": "rapid_spikes",
+    "step_frequency_hz": [2.0, 3.0],
+    "confidence_indicators": {
+      "strong": "max > 500 AND variance > 300 AND step_frequency > 2.0",
+      "moderate": "avg > 200 AND max > 400",
+      "weak": "variance > 200"
+    }
+  },
+  "Crawling": {
+    "description": "Near-zero pressure - body weight on hands and knees",
+    "avg_range": [0, 50],
+    "max_range": [0, 100],
+    "active_count_range": [0, 8],
+    "variance_range": [0, 20],
+    "left_right_asymmetry_max": 30,
+    "pattern": "near_zero",
+    "confidence_indicators": {
+      "strong": "avg < 30 AND max < 80 AND active_count < 5",
+      "moderate": "avg < 50 AND max < 100",
+      "weak": "active_count < 8"
+    }
+  },
+  "Climbing": {
+    "description": "High toe and ball-of-foot pressure",
+    "avg_range": [200, 400],
+    "max_range": [400, 700],
+    "active_count_range": [12, 18],
+    "variance_range": [80, 150],
+    "left_right_asymmetry_max": 120,
+    "pattern": "toe_ball_focus",
+    "toe_sensors_ratio": 0.6,
+    "confidence_indicators": {
+      "strong": "max > 500 AND toe_pressure_ratio > 0.6",
+      "moderate": "avg > 250 AND active_count > 14",
+      "weak": "max > 400"
+    }
+  },
+  "Kneeling": {
+    "description": "Localized pressure on toes or heel",
+    "avg_range": [50, 150],
+    "max_range": [100, 250],
+    "active_count_range": [4, 10],
+    "variance_range": [0, 50],
+    "left_right_asymmetry_max": 60,
+    "pattern": "localized",
+    "confidence_indicators": {
+      "strong": "active_count < 8 AND max > 150 AND variance < 30",
+      "moderate": "avg IN [60, 120] AND active_count IN [4, 10]",
+      "weak": "active_count < 10"
+    }
+  },
+  "Carrying": {
+    "description": "Asymmetric pressure between left and right foot",
+    "avg_range": [150, 350],
+    "max_range": [300, 600],
+    "active_count_range": [12, 18],
+    "variance_range": [60, 150],
+    "left_right_asymmetry_min": 80,
+    "left_right_asymmetry_max": 250,
+    "pattern": "asymmetric",
+    "confidence_indicators": {
+      "strong": "abs(left_avg - right_avg) > 100 AND avg > 200",
+      "moderate": "abs(left_avg - right_avg) > 80",
+      "weak": "variance > 60"
+    }
+  },
+  "Hose_Operation": {
+    "description": "Stable stance with moderate pressure",
+    "avg_range": [100, 250],
+    "max_range": [200, 450],
+    "active_count_range": [10, 18],
+    "variance_range": [40, 100],
+    "left_right_asymmetry_max": 100,
+    "pattern": "stable_stance",
+    "confidence_indicators": {
+      "strong": "avg IN [120, 220] AND variance IN [40, 80]",
+      "moderate": "active_count > 12 AND max IN [250, 400]",
+      "weak": "variance IN [40, 100]"
+    }
+  },
+  "Idle": {
+    "description": "Random sporadic movements with low pressure",
+    "avg_range": [0, 150],
+    "max_range": [0, 250],
+    "active_count_range": [0, 12],
+    "variance_range": [0, 50],
+    "left_right_asymmetry_max": 80,
+    "pattern": "random",
+    "confidence_indicators": {
+      "strong": "avg < 100 AND variance < 30 AND no_clear_pattern",
+      "moderate": "avg < 150 AND active_count < 10",
+      "weak": "variance < 50"
+    }
+  },
+  "_metadata": {
+    "version": "1.0",
+    "units": {
+      "pressure": "raw sensor values (unitless)",
+      "frequency": "Hz (cycles per second)"
+    },
+    "sensor_info": {
+      "active_sensors_per_foot": 18,
+      "total_positions": 24,
+      "excluded_indices": [8, 12, 16, 19, 20, 23]
+    },
+    "usage_notes": [
+      "Thresholds represent typical ranges - actual values may vary by individual",
+      "Check multiple consecutive readings (>500ms) before confirming activity",
+      "Use confidence_indicators to score detection quality",
+      "Combine with accelerometer data for best accuracy",
+      "left_right_asymmetry = abs(left_foot_avg - right_foot_avg)"
+    ]
+  }
+}
