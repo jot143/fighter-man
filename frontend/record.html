@@ -37,6 +37,7 @@
             border-left: 3px solid #3b82f6;
         }
     </style>
+    <script src="js/activityDetector.js"></script>
 </head>
 
 <body class="text-gray-200">
@@ -106,7 +107,14 @@
                         <div id="recordingState" class="hidden">
                             <div class="recording-pulse text-6xl mb-4">🔴</div>
                             <h2 class="text-2xl font-semibold mb-2">Recording...</h2>
-                            <div id="currentActivity" class="text-xl text-blue-400 mb-4">Walking</div>
+                            <div id="detectedActivityContainer" class="mb-4">
+                                <div class="text-sm text-gray-500 mb-1">Detected Activity:</div>
+                                <div id="detectedActivity" class="text-xl">
+                                    <span id="activityLabel" class="text-green-400 font-semibold">Waiting...</span>
+                                    <span id="activityConfidence" class="text-lg text-gray-400 ml-2"></span>
+                                </div>
+                                <div class="text-sm text-gray-500 mt-1">Selected Activity: <span id="selectedActivity" class="text-blue-400">Walking</span></div>
+                            </div>
                             <div class="flex items-center justify-center gap-8 text-sm text-gray-400">
                                 <div>
                                     <span class="text-2xl font-mono text-white" id="recordingDuration">00:00</span>
@@ -128,6 +136,14 @@
                             <div class="text-6xl mb-4">▶️</div>
                             <h2 class="text-2xl font-semibold mb-2">Replay Mode</h2>
                             <div id="replaySession" class="text-xl text-blue-400 mb-4"></div>
+                            <div id="detectedActivityContainer" class="mb-4">
+                                <div class="text-sm text-gray-500 mb-1">Detected Activity:</div>
+                                <div id="detectedActivity" class="text-xl">
+                                    <span id="activityLabel" class="text-green-400 font-semibold">Waiting...</span>
+                                    <span id="activityConfidence" class="text-lg text-gray-400 ml-2"></span>
+                                </div>
+                                <div class="text-sm text-gray-500 mt-1">Session Activity: <span id="selectedActivity" class="text-blue-400">-</span></div>
+                            </div>
                             <div id="replayTime" class="text-lg text-gray-400 mb-3 font-mono">
                                 <span id="replayCurrentTime">00:00</span>
                                 <span class="text-gray-600"> / </span>
@@ -324,11 +340,17 @@
         let replaySessionId = null;       // Current replay session ID
         let replayTotalWindows = 0;       // Total windows in session
 
+        // Activity detection
+        let activityDetector = null;      // Activity detector instance
+
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             initFootBars();
             loadActivityTypes();
             loadSessions();
+
+            // Initialize activity detector
+            activityDetector = new ActivityDetector();
             connectSocket();
             checkActiveSession();
         });
@@ -483,14 +505,68 @@
             // Listen for live sensor data (no logging - too frequent at 30Hz)
             iotSocket.on('foot_data', (data) => {
                 updateFootDisplay(data);
+
+                // Update activity detector with new foot data (works during recording and replay)
+                if (activityDetector && (isRecording || isReplaying)) {
+                    activityDetector.updateFootData(data.data);
+
+                    // Trigger detection (if we also have accel data)
+                    const result = activityDetector.detectActivity();
+                    if (result.confidence > 0) {
+                        updateActivityDisplay(result.activity, result.confidence);
+                    }
+                }
             });
 
             iotSocket.on('accel_data', (data) => {
                 updateAccelDisplay(data);
+
+                // Update activity detector and run detection (works during recording and replay)
+                if (activityDetector && (isRecording || isReplaying)) {
+                    activityDetector.updateAccelData(data.data);
+
+                    // Trigger detection on every accel reading
+                    const result = activityDetector.detectActivity();
+                    updateActivityDisplay(result.activity, result.confidence);
+                }
             });
 
             // Store socket for later use
             window.iotSocket = iotSocket;
+        }
+
+        // Update the detected activity display
+        function updateActivityDisplay(activity, confidence) {
+            if (!isRecording && !isReplaying) return;
+
+            // Determine which state is active and get elements from correct container
+            let activityLabelEl, confidenceEl;
+
+            if (isReplaying) {
+                // Get elements from replay state (visible during replay)
+                const replayState = document.getElementById('replayState');
+                activityLabelEl = replayState?.querySelector('#activityLabel');
+                confidenceEl = replayState?.querySelector('#activityConfidence');
+            } else {
+                // Get elements from recording state (visible during recording)
+                const recordingState = document.getElementById('recordingState');
+                activityLabelEl = recordingState?.querySelector('#activityLabel');
+                confidenceEl = recordingState?.querySelector('#activityConfidence');
+            }
+
+            if (activityLabelEl && confidenceEl) {
+                activityLabelEl.textContent = activity;
+                confidenceEl.textContent = `(${confidence}%)`;
+
+                // Color coding based on confidence
+                if (confidence >= 80) {
+                    activityLabelEl.className = 'text-green-400 font-semibold';
+                } else if (confidence >= 60) {
+                    activityLabelEl.className = 'text-yellow-400 font-semibold';
+                } else {
+                    activityLabelEl.className = 'text-orange-400 font-semibold';
+                }
+            }
         }
 
         // Update connection status indicator
@@ -549,6 +625,13 @@
                 footReadingCount = 0;
                 accelReadingCount = 0;
 
+                // Reset activity detector
+                if (activityDetector) {
+                    activityDetector.reset();
+                }
+                document.getElementById('activityLabel').textContent = 'Waiting...';
+                document.getElementById('activityConfidence').textContent = '';
+
                 // Update UI
                 updateRecordingUI(true, activityType);
                 startRecordingTimer();
@@ -576,6 +659,12 @@
 
                 isRecording = false;
                 stopRecordingTimer();
+
+                // Clear detection state
+                if (activityDetector) {
+                    activityDetector.reset();
+                }
+
                 updateRecordingUI(false);
                 // Don't call loadSessions() here - socket event will handle it
 
@@ -604,7 +693,7 @@
                 idleState.classList.add('hidden');
                 replayState.classList.add('hidden');
                 recordingState.classList.remove('hidden');
-                document.getElementById('currentActivity').textContent = activityType;
+                document.getElementById('selectedActivity').textContent = activityType;
             } else {
                 btn.innerHTML = `
                     <span class="w-3 h-3 rounded-full bg-white"></span>
@@ -734,6 +823,7 @@
                 document.getElementById('recordingState').classList.add('hidden');
                 document.getElementById('replayState').classList.remove('hidden');
                 document.getElementById('replaySession').textContent = `${data.session.name} - ${data.session.activity_type}`;
+                document.getElementById('selectedActivity').textContent = data.session.activity_type || '-';
 
                 // Update timeline
                 updateTimeline(data.session);
@@ -958,6 +1048,11 @@
             isReplaying = true;
             document.getElementById('playPauseBtn').textContent = '⏸';
 
+            // Reset activity detector for fresh replay detection
+            if (activityDetector) {
+                activityDetector.reset();
+            }
+
             // Start playback loop
             // Calculate interval based on replay speed (default 100ms for 10Hz playback)
             const baseInterval = 100; // ms
@@ -976,6 +1071,11 @@
             if (replayTimer) {
                 clearInterval(replayTimer);
                 replayTimer = null;
+            }
+
+            // Clear activity detector state when pausing
+            if (activityDetector) {
+                activityDetector.reset();
             }
         }
 
@@ -1047,11 +1147,27 @@
             if (replayReadingIndex < footReadings.length) {
                 const footReading = footReadings[replayReadingIndex];
                 updateFootDisplay(footReading);
+
+                // Update activity detector with foot data during replay
+                if (activityDetector && footReading.data) {
+                    activityDetector.updateFootData(footReading.data);
+                }
             }
 
             if (replayReadingIndex < accelReadings.length) {
                 const accelReading = accelReadings[replayReadingIndex];
                 updateAccelDisplay(accelReading);
+
+                // Update activity detector and run detection
+                if (activityDetector && accelReading.data) {
+                    activityDetector.updateAccelData(accelReading.data);
+
+                    // Run detection after accel update (accel is primary trigger)
+                    const result = activityDetector.detectActivity();
+                    if (result.confidence > 0) {
+                        updateActivityDisplay(result.activity, result.confidence);
+                    }
+                }
             }
 
             // Update playhead position
