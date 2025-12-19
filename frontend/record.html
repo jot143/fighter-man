@@ -448,7 +448,7 @@
                         </div>
                     </div>
                     <div class="flex items-center gap-2 text-xs text-gray-500 cursor-pointer" onclick="selectSession('${s.id}')">
-                        <span class="bg-blue-900 text-blue-300 px-1.5 py-0.5 rounded">${s.activity_type || 'Unknown'}</span>
+                        ${s.activity_type ? `<span class="bg-blue-900 text-blue-300 px-1.5 py-0.5 rounded">${s.activity_type}</span>` : ''}
                         <span>${new Date(s.created_at).toLocaleTimeString()}</span>
                     </div>
                 </div>
@@ -893,7 +893,9 @@
                 document.getElementById('idleState').classList.add('hidden');
                 document.getElementById('recordingState').classList.add('hidden');
                 document.getElementById('replayState').classList.remove('hidden');
-                document.getElementById('replaySession').textContent = `${data.session.name} - ${data.session.activity_type}`;
+                document.getElementById('replaySession').textContent = data.session.activity_type ?
+                    `${data.session.name} - ${data.session.activity_type}` :
+                    data.session.name;
                 document.getElementById('selectedActivity').textContent = data.session.activity_type || '-';
 
                 // Update timeline
