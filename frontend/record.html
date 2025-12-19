@@ -339,6 +339,9 @@
         let replayTimer = null;           // Interval timer for playback
         let replaySessionId = null;       // Current replay session ID
         let replayTotalWindows = 0;       // Total windows in session
+        let replaySessionDuration = 0;    // Total session duration in seconds (from timestamps)
+        let replayStartTime = null;       // Timestamp when replay started (for elapsed time tracking)
+        let replaySessionStartTime = null; // Session created_at timestamp in ms (for window offset calculation)
 
         // Activity detection
         let activityDetector = null;      // Activity detector instance
@@ -807,8 +810,70 @@
                 replayCurrentWindowIndex = 0;
                 replayReadingIndex = 0;
 
-                // Calculate and display total time
-                const totalSeconds = Math.floor(replayTotalWindows * 0.5);
+                // Calculate actual recording duration
+                let totalSeconds = 0;
+
+                // Try using session timestamps first (recording start to stop)
+                if (data.session.created_at && data.session.stopped_at) {
+                    const startTime = new Date(data.session.created_at);
+                    const stopTime = new Date(data.session.stopped_at);
+                    const sessionDuration = Math.floor((stopTime - startTime) / 1000);
+
+                    // Sanity check: if session was left open for more than 2 hours, use window span instead
+                    const MAX_REASONABLE_DURATION = 2 * 60 * 60; // 2 hours in seconds
+
+                    if (sessionDuration <= MAX_REASONABLE_DURATION) {
+                        // Session duration is reasonable, use it
+                        totalSeconds = sessionDuration;
+                    } else {
+                        // Session was left open too long, fall back to window span
+                        console.warn('[Replay] Session duration exceeds 2 hours, using window span instead');
+                        if (replayWindows.length > 0) {
+                            const firstWindow = replayWindows[0];
+                            const lastWindow = replayWindows[replayWindows.length - 1];
+                            if (firstWindow.start_time && lastWindow.end_time) {
+                                const duration_ms = lastWindow.end_time - firstWindow.start_time;
+                                totalSeconds = Math.ceil(duration_ms / 1000);
+                            }
+                        }
+                    }
+                } else if (replayWindows.length > 0) {
+                    // No session timestamps, use window span
+                    const firstWindow = replayWindows[0];
+                    const lastWindow = replayWindows[replayWindows.length - 1];
+                    if (firstWindow.start_time && lastWindow.end_time) {
+                        const duration_ms = lastWindow.end_time - firstWindow.start_time;
+                        totalSeconds = Math.ceil(duration_ms / 1000);
+                    } else {
+                        // Fallback to window count
+                        totalSeconds = Math.floor(replayTotalWindows * 0.5);
+                    }
+                } else {
+                    // Fallback to window count if no windows loaded yet
+                    totalSeconds = Math.floor(replayTotalWindows * 0.5);
+                }
+
+                // Store for use in playback
+                replaySessionDuration = totalSeconds;
+
+                // Store session start time for timestamp-based playback
+                if (data.session.created_at) {
+                    replaySessionStartTime = new Date(data.session.created_at).getTime();
+                }
+
+                // Debug: check window timestamps vs session duration
+                if (replayWindows.length > 0) {
+                    const firstWindow = replayWindows[0];
+                    const lastWindow = replayWindows[replayWindows.length - 1];
+                    console.log('[DEBUG] Total windows:', replayWindows.length);
+                    console.log('[DEBUG] Session duration:', totalSeconds, 'seconds');
+                    if (firstWindow.start_time && lastWindow.end_time) {
+                        const windowSpan = Math.ceil((lastWindow.end_time - firstWindow.start_time) / 1000);
+                        console.log('[DEBUG] Window data span:', windowSpan, 'seconds');
+                        console.log('[DEBUG] Gap at end:', totalSeconds - windowSpan, 'seconds');
+                    }
+                }
+
                 const totalMinutes = Math.floor(totalSeconds / 60);
                 const totalSecs = totalSeconds % 60;
                 document.getElementById('replayTotalTime').textContent =
@@ -1048,6 +1113,9 @@
             isReplaying = true;
             document.getElementById('playPauseBtn').textContent = '⏸';
 
+            // Track replay start time for elapsed time calculation
+            replayStartTime = Date.now();
+
             // Reset activity detector for fresh replay detection
             if (activityDetector) {
                 activityDetector.reset();
@@ -1086,15 +1154,45 @@
                 return;
             }
 
+            // Check if we've reached the end of the session duration based on elapsed time
+            if (replaySessionDuration > 0 && replayStartTime) {
+                const elapsedMs = Date.now() - replayStartTime;
+                const elapsedSeconds = elapsedMs / 1000;
+
+                if (elapsedSeconds >= replaySessionDuration) {
+                    // Reached the end of session duration
+                    pauseReplay();
+                    console.log('Replay finished - reached session duration of', replaySessionDuration, 'seconds');
+                    return;
+                }
+            }
+
             // Get current window (relative to loaded buffer)
             const windowIndexInBuffer = replayCurrentWindowIndex - (replayWindows.length > 0 ? 0 : 0);
             const currentWindow = replayWindows[windowIndexInBuffer];
 
             if (!currentWindow) {
-                // No more windows, end replay
-                pauseReplay();
-                console.log('Replay finished');
-                return;
+                // No more windows with data, but keep playing to fill the time
+                // Just update the playhead and continue without trying to load more data
+                updatePlayhead();
+                return; // Keep timer running, just don't process any data
+            }
+
+            // Check if it's time to play this window based on its timestamp
+            if (currentWindow.start_time && replaySessionStartTime && replayStartTime) {
+                // Calculate when this window should play (offset from session start)
+                const windowOffsetMs = currentWindow.start_time - replaySessionStartTime;
+                const windowOffsetSec = windowOffsetMs / 1000;
+
+                // Calculate current elapsed replay time
+                const elapsedMs = Date.now() - replayStartTime;
+                const elapsedSec = elapsedMs / 1000;
+
+                // If we haven't reached this window's time yet, skip it
+                if (elapsedSec < windowOffsetSec) {
+                    updatePlayhead();
+                    return; // Try again next tick
+                }
             }
 
             // Parse raw_data if it exists
@@ -1133,13 +1231,7 @@
                 // Check if we need to preload more windows
                 checkPreload();
 
-                // Check if we've reached the end of all windows
-                if (replayCurrentWindowIndex >= replayTotalWindows) {
-                    pauseReplay();
-                    console.log('Replay finished - reached end of session');
-                    return;
-                }
-
+                // Don't stop based on window count - let elapsed time check handle it
                 return;
             }
 
@@ -1198,10 +1290,21 @@
 
         // Update playhead position on timeline
         function updatePlayhead() {
-            if (replayTotalWindows === 0) return;
+            if (replaySessionDuration === 0) return;
 
-            // Calculate position as percentage
-            const percentage = (replayCurrentWindowIndex / replayTotalWindows) * 100;
+            // Calculate elapsed time since replay started
+            let estimatedSeconds = 0;
+            if (replayStartTime) {
+                const elapsedMs = Date.now() - replayStartTime;
+                estimatedSeconds = Math.floor(elapsedMs / 1000);
+                // Cap at session duration
+                if (estimatedSeconds > replaySessionDuration) {
+                    estimatedSeconds = replaySessionDuration;
+                }
+            }
+
+            // Calculate position as percentage based on time
+            const percentage = (estimatedSeconds / replaySessionDuration) * 100;
 
             // Update playhead element if it exists
             const playhead = document.getElementById('playhead');
@@ -1212,8 +1315,6 @@
             // Update time display if it exists
             const currentTimeEl = document.getElementById('replayCurrentTime');
             if (currentTimeEl) {
-                // Estimate time based on window index (each window is ~500ms)
-                const estimatedSeconds = Math.floor(replayCurrentWindowIndex * 0.5);
                 const minutes = Math.floor(estimatedSeconds / 60);
                 const seconds = estimatedSeconds % 60;
                 currentTimeEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;

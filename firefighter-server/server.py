@@ -251,7 +251,7 @@ def create_session():
     if active_session:
         store = get_vector_store()
         store.flush_session(active_session.id)
-        repo.update(active_session.id, status="stopped", stopped_at=datetime.now())
+        repo.update(active_session.id, status="stopped", stopped_at=datetime.utcnow())
         print(f"[Session] Auto-stopped: {active_session.id}")
 
     # Create new session
@@ -373,7 +373,7 @@ def stop_session(session_id):
     store = get_vector_store()
     store.flush_session(session_id)
 
-    updated = repo.update(session_id, status="stopped", stopped_at=datetime.now())
+    updated = repo.update(session_id, status="stopped", stopped_at=datetime.utcnow())
 
     if current_session_id == session_id:
         current_session_id = None
