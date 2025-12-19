@@ -1160,6 +1160,8 @@
                 const elapsedSeconds = elapsedMs / 1000;
 
                 if (elapsedSeconds >= replaySessionDuration) {
+                    // Update playhead one final time to show the complete duration
+                    updatePlayhead();
                     // Reached the end of session duration
                     pauseReplay();
                     console.log('Replay finished - reached session duration of', replaySessionDuration, 'seconds');
