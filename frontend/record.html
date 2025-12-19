@@ -1308,6 +1308,12 @@
                 replayCurrentWindowIndex++;
                 replayReadingIndex = 0;
 
+                // Reset activity detector buffer when moving to new window
+                // This prevents mixed data from causing incorrect detections during transitions
+                if (activityDetector) {
+                    activityDetector.reset();
+                }
+
                 // Check if we need to preload more windows
                 checkPreload();
 
