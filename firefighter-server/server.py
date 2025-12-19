@@ -16,6 +16,7 @@ from flask_cors import CORS
 
 from lib.config import Config
 from lib.vector_store import VectorStore
+from lib.database import Database, SessionRepository
 
 # Load environment variables
 load_dotenv()
@@ -42,8 +43,11 @@ socketio = SocketIO(
 # Initialize Qdrant vector store
 vector_store: VectorStore = None
 
+# Initialize PostgreSQL database
+db: Database = None
+session_repo: SessionRepository = None
+
 # Session management
-sessions = {}  # session_id -> session_info
 current_session_id: str = None
 
 # Valid activity types for Stage 1
@@ -66,6 +70,22 @@ def get_vector_store() -> VectorStore:
     if vector_store is None:
         vector_store = VectorStore(config.qdrant)
     return vector_store
+
+
+def get_database() -> Database:
+    """Get or create database instance."""
+    global db
+    if db is None:
+        db = Database(config.postgres)
+    return db
+
+
+def get_session_repo() -> SessionRepository:
+    """Get or create session repository instance."""
+    global session_repo
+    if session_repo is None:
+        session_repo = SessionRepository(get_database())
+    return session_repo
 
 
 # ============================================================
@@ -172,10 +192,17 @@ def health_check():
     store = get_vector_store()
     qdrant_health = store.health_check()
 
+    database = get_database()
+    postgres_health = database.health_check()
+
     return jsonify({
-        "status": "healthy" if qdrant_health["status"] == "healthy" else "degraded",
+        "status": "healthy" if all([
+            qdrant_health["status"] == "healthy",
+            postgres_health["status"] == "healthy"
+        ]) else "degraded",
         "server": "running",
         "qdrant": qdrant_health,
+        "postgres": postgres_health,
         "active_session": current_session_id,
     })
 
@@ -216,61 +243,60 @@ def create_session():
             "error": f"Invalid activity_type. Must be one of: {ACTIVITY_TYPES}"
         }), 400
 
-    # Stop any existing session before creating new one
-    if current_session_id and current_session_id in sessions:
+    repo = get_session_repo()
+
+    # Auto-stop any existing active session
+    active_session = repo.get_active()
+    if active_session:
         store = get_vector_store()
-        store.flush_session(current_session_id)
-        sessions[current_session_id]["status"] = "stopped"
-        sessions[current_session_id]["stopped_at"] = datetime.now().isoformat()
-        print(f"[Session] Auto-stopped: {current_session_id}")
+        store.flush_session(active_session.id)
+        repo.update(active_session.id, status="stopped", stopped_at=datetime.now())
+        print(f"[Session] Auto-stopped: {active_session.id}")
 
     # Create new session
-    session_id = str(uuid.uuid4())
-    sessions[session_id] = {
-        "id": session_id,
-        "name": session_name,
-        "activity_type": activity_type,
-        "created_at": datetime.now().isoformat(),
-        "status": "recording",
-    }
-    current_session_id = session_id
+    session = repo.create(name=session_name, activity_type=activity_type)
+    current_session_id = session.id
 
-    print(f"[Session] Created: {session_id} ({session_name}) - Activity: {activity_type}")
+    print(f"[Session] Created: {session.id} ({session.name}) - Activity: {activity_type}")
 
     # Notify connected clients
     socketio.emit(
         "session_started",
-        {"session_id": session_id, "name": session_name, "activity_type": activity_type},
+        {"session_id": session.id, "name": session.name, "activity_type": activity_type},
         namespace="/iot",
     )
 
-    return jsonify(sessions[session_id]), 201
+    return jsonify(session.to_dict()), 201
 
 
 @app.route("/api/sessions", methods=["GET"])
 def list_sessions():
     """List all sessions."""
-    return jsonify(list(sessions.values()))
+    repo = get_session_repo()
+    sessions = repo.list_all()
+    return jsonify([s.to_dict() for s in sessions])
 
 
 @app.route("/api/sessions/active", methods=["GET"])
 def get_active_session():
     """Get the currently active recording session."""
-    if current_session_id and current_session_id in sessions:
-        return jsonify(sessions[current_session_id])
-    return jsonify(None)
+    repo = get_session_repo()
+    session = repo.get_active()
+    return jsonify(session.to_dict() if session else None)
 
 
 @app.route("/api/sessions/<session_id>", methods=["GET"])
 def get_session(session_id):
     """Get session details."""
-    if session_id not in sessions:
+    repo = get_session_repo()
+    session = repo.get(session_id)
+    if not session:
         return jsonify({"error": "Session not found"}), 404
 
     store = get_vector_store()
     windows = store.get_session_data(session_id, include_raw=False)
 
-    session_info = sessions[session_id].copy()
+    session_info = session.to_dict()
     session_info["window_count"] = len(windows)
     session_info["windows"] = windows
 
@@ -288,24 +314,26 @@ def update_session(session_id):
         "labels": {"window_id": "Walking", ...}
     }
     """
-    if session_id not in sessions:
+    repo = get_session_repo()
+    session = repo.get(session_id)
+    if not session:
         return jsonify({"error": "Session not found"}), 404
 
     data = request.get_json() or {}
 
-    # Update session metadata
-    if "name" in data:
-        sessions[session_id]["name"] = data["name"]
-    if "status" in data:
-        sessions[session_id]["status"] = data["status"]
+    # Update session metadata in database
+    updated = repo.update(
+        session_id,
+        name=data.get("name"),
+        status=data.get("status")
+    )
 
     # Update labels in Qdrant
     if "labels" in data:
         store = get_vector_store()
-        updated = store.update_labels(session_id, data["labels"])
-        sessions[session_id]["labels_updated"] = updated
+        store.update_labels(session_id, data["labels"])
 
-    return jsonify(sessions[session_id])
+    return jsonify(updated.to_dict())
 
 
 @app.route("/api/sessions/<session_id>", methods=["DELETE"])
@@ -313,19 +341,19 @@ def delete_session(session_id):
     """Delete a session and all its data."""
     global current_session_id
 
-    if session_id not in sessions:
+    repo = get_session_repo()
+    if not repo.get(session_id):
         return jsonify({"error": "Session not found"}), 404
 
     store = get_vector_store()
     deleted_count = store.delete_session(session_id)
-
-    del sessions[session_id]
+    repo.delete(session_id)
 
     if current_session_id == session_id:
         current_session_id = None
 
     return jsonify({
-        "message": f"Session deleted",
+        "message": "Session deleted",
         "windows_deleted": deleted_count,
     })
 
@@ -335,15 +363,16 @@ def stop_session(session_id):
     """Stop the current recording session."""
     global current_session_id
 
-    if session_id not in sessions:
+    repo = get_session_repo()
+    session = repo.get(session_id)
+    if not session:
         return jsonify({"error": "Session not found"}), 404
 
     # Flush remaining data
     store = get_vector_store()
     store.flush_session(session_id)
 
-    sessions[session_id]["status"] = "stopped"
-    sessions[session_id]["stopped_at"] = datetime.now().isoformat()
+    updated = repo.update(session_id, status="stopped", stopped_at=datetime.now())
 
     if current_session_id == session_id:
         current_session_id = None
@@ -355,7 +384,7 @@ def stop_session(session_id):
         namespace="/iot",
     )
 
-    return jsonify(sessions[session_id])
+    return jsonify(updated.to_dict())
 
 
 # ============================================================
@@ -371,7 +400,9 @@ def export_session(session_id):
         format: "json" (default) or "csv"
         include_raw: "true" to include raw sensor data
     """
-    if session_id not in sessions:
+    repo = get_session_repo()
+    session = repo.get(session_id)
+    if not session:
         return jsonify({"error": "Session not found"}), 404
 
     include_raw = request.args.get("include_raw", "false").lower() == "true"
@@ -402,7 +433,7 @@ def export_session(session_id):
 
     # JSON export (default)
     return jsonify({
-        "session": sessions[session_id],
+        "session": session.to_dict(),
         "windows": windows,
         "window_count": len(windows),
     })
@@ -478,10 +509,24 @@ if __name__ == "__main__":
     print(f"Port: {config.server.port}")
     print(f"Debug: {config.server.debug}")
     print(f"Qdrant: {config.qdrant.host}:{config.qdrant.port}")
+    print(f"PostgreSQL: {config.postgres.host}:{config.postgres.port}/{config.postgres.database}")
     print("=" * 60)
 
     # Initialize vector store on startup
     get_vector_store()
+    print("[Qdrant] Vector store initialized")
+
+    # Initialize database
+    get_database()
+    get_session_repo()
+    print("[Database] PostgreSQL initialized")
+
+    # Restore active session if server restarted
+    repo = get_session_repo()
+    active_session = repo.get_active()
+    if active_session:
+        current_session_id = active_session.id
+        print(f"[Session] Restored active session: {current_session_id}")
 
     socketio.run(
         app,

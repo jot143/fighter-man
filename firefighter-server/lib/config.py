@@ -44,6 +44,44 @@ class QdrantConfig:
 
 
 @dataclass
+class PostgresConfig:
+    """PostgreSQL database configuration."""
+    host: str = "localhost"
+    port: int = 5432
+    database: str = "firefighter"
+    user: str = "firefighter_user"
+    password: str = "dev_password"
+    pool_size: int = 5
+    max_overflow: int = 10
+    pool_timeout: int = 30
+    pool_recycle: int = 3600
+    echo: bool = False
+
+    @classmethod
+    def from_env(cls) -> "PostgresConfig":
+        return cls(
+            host=os.getenv("POSTGRES_HOST", "localhost"),
+            port=int(os.getenv("POSTGRES_PORT", "5432")),
+            database=os.getenv("POSTGRES_DB", "firefighter"),
+            user=os.getenv("POSTGRES_USER", "firefighter_user"),
+            password=os.getenv("POSTGRES_PASSWORD", "dev_password"),
+            pool_size=int(os.getenv("POSTGRES_POOL_SIZE", "5")),
+            max_overflow=int(os.getenv("POSTGRES_MAX_OVERFLOW", "10")),
+            pool_timeout=int(os.getenv("POSTGRES_POOL_TIMEOUT", "30")),
+            pool_recycle=int(os.getenv("POSTGRES_POOL_RECYCLE", "3600")),
+            echo=os.getenv("POSTGRES_ECHO", "false").lower() == "true",
+        )
+
+    @property
+    def connection_url(self) -> str:
+        """Get SQLAlchemy connection URL."""
+        return (
+            f"postgresql+psycopg2://{self.user}:{self.password}"
+            f"@{self.host}:{self.port}/{self.database}"
+        )
+
+
+@dataclass
 class AuthConfig:
     """Device authentication configuration."""
     allowed_device_keys: List[str] = field(default_factory=list)
@@ -66,6 +104,7 @@ class Config:
     """Main configuration container."""
     server: ServerConfig
     qdrant: QdrantConfig
+    postgres: PostgresConfig
     auth: AuthConfig
 
     @classmethod
@@ -73,5 +112,6 @@ class Config:
         return cls(
             server=ServerConfig.from_env(),
             qdrant=QdrantConfig.from_env(),
+            postgres=PostgresConfig.from_env(),
             auth=AuthConfig.from_env(),
         )
