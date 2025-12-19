@@ -15,7 +15,15 @@ Data collection system for training an AI model that recognizes firefighter acti
 
 ```bash
 cd firefighter-server
-./start.sh
+
+# Activate virtual environment
+source venv/bin/activate
+
+# (Optional) Send test data
+python tests/test_client.py --duration 30 --no-auto-session
+
+# Start the server
+python server.py
 ```
 
 ## Quick Links
