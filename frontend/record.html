@@ -798,6 +798,11 @@
                 return;
             }
 
+            // Stop any active replay before switching sessions
+            if (isReplaying) {
+                pauseReplay();
+            }
+
             try {
                 // Load first batch of windows with raw data
                 const response = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/replay?offset=0&limit=${replayBatchSize}`);
@@ -809,6 +814,24 @@
                 replayTotalWindows = data.total_windows || 0;
                 replayCurrentWindowIndex = 0;
                 replayReadingIndex = 0;
+                replayStartTime = null;  // Reset replay timer
+
+                // Reset activity detector and display for new session
+                if (activityDetector) {
+                    activityDetector.reset();
+                }
+
+                // Reset activity display to "Waiting..." for replay
+                const replayState = document.getElementById('replayState');
+                if (replayState) {
+                    const activityLabelEl = replayState.querySelector('#activityLabel');
+                    const confidenceEl = replayState.querySelector('#activityConfidence');
+                    if (activityLabelEl && confidenceEl) {
+                        activityLabelEl.textContent = 'Waiting...';
+                        activityLabelEl.className = 'text-gray-400';
+                        confidenceEl.textContent = '';
+                    }
+                }
 
                 // Calculate actual recording duration
                 let totalSeconds = 0;
