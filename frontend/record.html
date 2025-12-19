@@ -399,10 +399,11 @@
                 const types = await response.json();
 
                 const select = document.getElementById('activityType');
-                select.innerHTML = types.map(t => `<option value="${t}">${t}</option>`).join('');
+                select.innerHTML = '<option value="">Select activity (optional)</option>' +
+                    types.map(t => `<option value="${t}">${t}</option>`).join('');
             } catch (error) {
                 console.error('Failed to load activity types:', error);
-                document.getElementById('activityType').innerHTML = '<option value="Walking">Walking</option>';
+                document.getElementById('activityType').innerHTML = '<option value="">Select activity (optional)</option><option value="Walking">Walking</option>';
             }
         }
 
@@ -599,13 +600,8 @@
 
         // Start recording
         async function startRecording() {
-            const activityType = document.getElementById('activityType').value;
+            const activityType = document.getElementById('activityType').value || null;
             const sessionName = document.getElementById('sessionName').value;
-
-            if (!activityType) {
-                alert('Please select an activity type');
-                return;
-            }
 
             try {
                 const response = await fetch(`${SERVER_URL}/api/sessions`, {
@@ -882,19 +878,6 @@
                 // Store session start time for timestamp-based playback
                 if (data.session.created_at) {
                     replaySessionStartTime = new Date(data.session.created_at).getTime();
-                }
-
-                // Debug: check window timestamps vs session duration
-                if (replayWindows.length > 0) {
-                    const firstWindow = replayWindows[0];
-                    const lastWindow = replayWindows[replayWindows.length - 1];
-                    console.log('[DEBUG] Total windows:', replayWindows.length);
-                    console.log('[DEBUG] Session duration:', totalSeconds, 'seconds');
-                    if (firstWindow.start_time && lastWindow.end_time) {
-                        const windowSpan = Math.ceil((lastWindow.end_time - firstWindow.start_time) / 1000);
-                        console.log('[DEBUG] Window data span:', windowSpan, 'seconds');
-                        console.log('[DEBUG] Gap at end:', totalSeconds - windowSpan, 'seconds');
-                    }
                 }
 
                 const totalMinutes = Math.floor(totalSeconds / 60);
