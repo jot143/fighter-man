@@ -441,6 +441,56 @@ def export_session(session_id):
 
 
 # ============================================================
+# REST API - Replay
+# ============================================================
+
+@app.route("/api/sessions/<session_id>/replay", methods=["GET"])
+def get_replay_data(session_id):
+    """
+    Get windows for replay with pagination.
+
+    Optimized endpoint for session replay that returns windows in batches
+    for efficient memory usage and smooth playback.
+
+    Query params:
+        offset: Starting window index (default: 0)
+        limit: Number of windows to return (default: 20, max: 100)
+
+    Returns:
+        {
+            "session": {session metadata},
+            "windows": [{window with raw_data}, ...],
+            "total_windows": int,
+            "offset": int,
+            "limit": int,
+            "has_more": bool
+        }
+    """
+    repo = get_session_repo()
+    session = repo.get(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    offset = int(request.args.get("offset", 0))
+    limit = min(int(request.args.get("limit", 20)), 100)
+
+    store = get_vector_store()
+    all_windows = store.get_session_data(session_id, include_raw=True)
+
+    # Paginate windows
+    windows = all_windows[offset:offset + limit]
+
+    return jsonify({
+        "session": session.to_dict(),
+        "windows": windows,
+        "total_windows": len(all_windows),
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + limit < len(all_windows)
+    })
+
+
+# ============================================================
 # REST API - Query (Similarity Search)
 # ============================================================
 

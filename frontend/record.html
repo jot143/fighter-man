@@ -306,10 +306,18 @@
         let footReadingCount = 0;
         let accelReadingCount = 0;
         let sessions = [];
-        let replayData = null;
-        let isReplaying = false;
-        let replayIndex = 0;
-        let replayTimer = null;
+        // Replay state
+        let replayWindows = [];           // Currently loaded windows with raw data
+        let replayWindowsMetadata = [];   // All windows metadata (lightweight)
+        let replayCurrentWindowIndex = 0; // Current window index
+        let replayReadingIndex = 0;       // Current reading within window
+        let replaySpeed = 1.0;            // Playback speed multiplier (1x default)
+        let replayPreloadOffset = 10;     // Preload when within 10 windows of end
+        let replayBatchSize = 20;         // Windows per batch
+        let isReplaying = false;          // Playback active flag
+        let replayTimer = null;           // Interval timer for playback
+        let replaySessionId = null;       // Current replay session ID
+        let replayTotalWindows = 0;       // Total windows in session
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
@@ -389,15 +397,26 @@
             }
 
             list.innerHTML = sessions.map(s => `
-                <div class="session-item px-4 py-3 cursor-pointer hover:bg-gray-900 transition-colors"
-                     onclick="selectSession('${s.id}')">
+                <div class="session-item px-4 py-3 hover:bg-gray-900 transition-colors">
                     <div class="flex items-center justify-between mb-1">
-                        <span class="font-medium text-sm">${s.name || 'Unnamed'}</span>
-                        <span class="text-xs px-2 py-0.5 rounded ${s.status === 'recording' ? 'bg-red-900 text-red-300' : 'bg-gray-700 text-gray-400'}">
-                            ${s.status}
-                        </span>
+                        <span class="font-medium text-sm cursor-pointer flex-1 truncate mr-2" onclick="selectSession('${s.id}')">${s.name || 'Unnamed'}</span>
+                        <div class="flex items-center gap-1 flex-shrink-0">
+                            <button onclick="event.stopPropagation(); renameSession('${s.id}', '${s.name.replace(/'/g, "\\'")}');"
+                                    class="text-xs px-1.5 py-1 bg-gray-700 hover:bg-gray-600 rounded text-gray-300 flex-shrink-0 whitespace-nowrap"
+                                    title="Rename session">
+                                ✏️
+                            </button>
+                            <button onclick="event.stopPropagation(); deleteSession('${s.id}', '${s.name.replace(/'/g, "\\'")}');"
+                                    class="text-xs px-1.5 py-1 bg-red-900 hover:bg-red-800 rounded text-red-300 flex-shrink-0 whitespace-nowrap"
+                                    title="Delete session">
+                                🗑️
+                            </button>
+                            <span class="text-xs px-2 py-1 rounded flex-shrink-0 ${s.status === 'recording' ? 'bg-red-900 text-red-300' : 'bg-gray-700 text-gray-400'}">
+                                ${s.status}
+                            </span>
+                        </div>
                     </div>
-                    <div class="flex items-center gap-2 text-xs text-gray-500">
+                    <div class="flex items-center gap-2 text-xs text-gray-500 cursor-pointer" onclick="selectSession('${s.id}')">
                         <span class="bg-blue-900 text-blue-300 px-1.5 py-0.5 rounded">${s.activity_type || 'Unknown'}</span>
                         <span>${new Date(s.created_at).toLocaleTimeString()}</span>
                     </div>
@@ -683,27 +702,121 @@
             }
 
             try {
-                const response = await fetch(`${SERVER_URL}/api/sessions/${sessionId}`);
-                const session = await response.json();
+                // Load first batch of windows with raw data
+                const response = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/replay?offset=0&limit=${replayBatchSize}`);
+                const data = await response.json();
 
-                // Update UI
+                // Initialize replay state
+                replaySessionId = sessionId;
+                replayWindows = data.windows || [];
+                replayTotalWindows = data.total_windows || 0;
+                replayCurrentWindowIndex = 0;
+                replayReadingIndex = 0;
+
+                // Update UI - remove active class from all sessions
                 document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
-                event.currentTarget?.classList.add('active');
 
                 // Show replay state
                 document.getElementById('idleState').classList.add('hidden');
                 document.getElementById('recordingState').classList.add('hidden');
                 document.getElementById('replayState').classList.remove('hidden');
-                document.getElementById('replaySession').textContent = `${session.name} - ${session.activity_type}`;
+                document.getElementById('replaySession').textContent = `${data.session.name} - ${data.session.activity_type}`;
 
-                // Load session data for replay
-                replayData = session;
-                replayIndex = 0;
-                updateTimeline(session);
+                // Update timeline
+                updateTimeline(data.session);
 
-                console.log('Selected session:', session);
+                console.log(`Loaded session: ${replayWindows.length} windows (${replayTotalWindows} total)`);
             } catch (error) {
                 console.error('Failed to load session:', error);
+                alert('Failed to load session for replay');
+            }
+        }
+
+        // Load next batch of windows for replay
+        async function loadWindowsBatch(offset) {
+            if (!replaySessionId) return;
+
+            try {
+                const response = await fetch(`${SERVER_URL}/api/sessions/${replaySessionId}/replay?offset=${offset}&limit=${replayBatchSize}`);
+                const data = await response.json();
+
+                // Append new windows to replay buffer
+                replayWindows.push(...data.windows);
+
+                console.log(`Loaded batch: offset=${offset}, count=${data.windows.length}, total in buffer=${replayWindows.length}`);
+
+                return data.has_more;
+            } catch (error) {
+                console.error('Failed to load window batch:', error);
+                return false;
+            }
+        }
+
+        // Rename session
+        async function renameSession(sessionId, currentName) {
+            const newName = prompt('Enter new name for session:', currentName);
+            if (!newName || newName === currentName) return;
+
+            try {
+                const response = await fetch(`${SERVER_URL}/api/sessions/${sessionId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newName })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to rename session');
+                }
+
+                // Refresh session list
+                await loadSessions();
+
+                // Update replay state if this is the current session
+                if (replaySessionId === sessionId) {
+                    document.getElementById('replaySession').textContent = newName;
+                }
+
+                console.log('Session renamed successfully');
+            } catch (error) {
+                console.error('Failed to rename session:', error);
+                alert('Failed to rename session');
+            }
+        }
+
+        // Delete session
+        async function deleteSession(sessionId, sessionName) {
+            if (!confirm(`Are you sure you want to delete "${sessionName}"?\n\nThis will permanently delete all recorded data.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${SERVER_URL}/api/sessions/${sessionId}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to delete session');
+                }
+
+                const result = await response.json();
+                console.log(`Session deleted: ${result.windows_deleted} windows removed`);
+
+                // Stop replay if this session is being replayed
+                if (replaySessionId === sessionId) {
+                    pauseReplay();
+                    replaySessionId = null;
+                    replayWindows = [];
+                    document.getElementById('replayState').classList.add('hidden');
+                    document.getElementById('idleState').classList.remove('hidden');
+                }
+
+                // Refresh session list
+                await loadSessions();
+
+                alert(`Session deleted successfully (${result.windows_deleted} windows removed)`);
+            } catch (error) {
+                console.error('Failed to delete session:', error);
+                alert('Failed to delete session');
             }
         }
 
@@ -776,7 +889,7 @@
 
         // Replay controls
         function replayControl(action) {
-            if (!replayData) return;
+            if (!replaySessionId) return;
 
             switch (action) {
                 case 'play':
@@ -787,18 +900,46 @@
                     }
                     break;
                 case 'prev':
-                    replayIndex = Math.max(0, replayIndex - 1);
+                    // Jump back one window
+                    if (replayCurrentWindowIndex > 0) {
+                        replayCurrentWindowIndex--;
+                        replayReadingIndex = 0;
+                        console.log(`Previous window: ${replayCurrentWindowIndex}`);
+                    }
                     break;
                 case 'next':
-                    replayIndex = Math.min((replayData.windows?.length || 1) - 1, replayIndex + 1);
+                    // Jump forward one window
+                    if (replayCurrentWindowIndex < replayTotalWindows - 1) {
+                        replayCurrentWindowIndex++;
+                        replayReadingIndex = 0;
+                        console.log(`Next window: ${replayCurrentWindowIndex}`);
+
+                        // Check if we need to preload
+                        checkPreload();
+                    }
                     break;
             }
         }
 
         function startReplay() {
+            if (replayWindows.length === 0) {
+                alert('No replay data loaded');
+                return;
+            }
+
             isReplaying = true;
             document.getElementById('playPauseBtn').textContent = '⏸';
-            // Implement replay logic here
+
+            // Start playback loop
+            // Calculate interval based on replay speed (default 100ms for 10Hz playback)
+            const baseInterval = 100; // ms
+            const interval = baseInterval / replaySpeed;
+
+            replayTimer = setInterval(() => {
+                playNextReading();
+            }, interval);
+
+            console.log('Replay started');
         }
 
         function pauseReplay() {
@@ -810,10 +951,129 @@
             }
         }
 
+        // Play next sensor reading from replay buffer
+        async function playNextReading() {
+            if (replayWindows.length === 0) {
+                pauseReplay();
+                return;
+            }
+
+            // Get current window (relative to loaded buffer)
+            const windowIndexInBuffer = replayCurrentWindowIndex - (replayWindows.length > 0 ? 0 : 0);
+            const currentWindow = replayWindows[windowIndexInBuffer];
+
+            if (!currentWindow) {
+                // No more windows, end replay
+                pauseReplay();
+                console.log('Replay finished');
+                return;
+            }
+
+            // Parse raw_data if it exists
+            let rawData;
+            if (typeof currentWindow.raw_data === 'string') {
+                try {
+                    rawData = JSON.parse(currentWindow.raw_data);
+                } catch (e) {
+                    console.error('Failed to parse raw_data:', e);
+                    replayCurrentWindowIndex++;
+                    replayReadingIndex = 0;
+                    return;
+                }
+            } else {
+                rawData = currentWindow.raw_data;
+            }
+
+            if (!rawData) {
+                // No raw data, skip to next window
+                replayCurrentWindowIndex++;
+                replayReadingIndex = 0;
+                return;
+            }
+
+            // Get sensor arrays
+            const footReadings = rawData.foot || [];
+            const accelReadings = rawData.accel || [];
+            const maxReadings = Math.max(footReadings.length, accelReadings.length);
+
+            // Check if we've reached end of current window
+            if (replayReadingIndex >= maxReadings) {
+                // Move to next window
+                replayCurrentWindowIndex++;
+                replayReadingIndex = 0;
+
+                // Check if we need to preload more windows
+                checkPreload();
+
+                // Check if we've reached the end of all windows
+                if (replayCurrentWindowIndex >= replayTotalWindows) {
+                    pauseReplay();
+                    console.log('Replay finished - reached end of session');
+                    return;
+                }
+
+                return;
+            }
+
+            // Display current reading
+            if (replayReadingIndex < footReadings.length) {
+                const footReading = footReadings[replayReadingIndex];
+                updateFootDisplay(footReading);
+            }
+
+            if (replayReadingIndex < accelReadings.length) {
+                const accelReading = accelReadings[replayReadingIndex];
+                updateAccelDisplay(accelReading);
+            }
+
+            // Update playhead position
+            updatePlayhead();
+
+            // Advance to next reading
+            replayReadingIndex++;
+        }
+
         // Timeline zoom
         function zoomTimeline(direction) {
             // Implement zoom functionality
             console.log('Zoom:', direction > 0 ? 'in' : 'out');
+        }
+
+        // Check if we need to preload more windows
+        async function checkPreload() {
+            // Calculate how many windows ahead of current position are loaded
+            const windowsAhead = replayWindows.length - replayCurrentWindowIndex;
+
+            // If we're within preloadOffset of the end of loaded windows, load more
+            if (windowsAhead <= replayPreloadOffset && replayWindows.length < replayTotalWindows) {
+                const nextOffset = replayWindows.length;
+                console.log(`Preloading windows from offset ${nextOffset}`);
+                await loadWindowsBatch(nextOffset);
+            }
+        }
+
+        // Update playhead position on timeline
+        function updatePlayhead() {
+            if (replayTotalWindows === 0) return;
+
+            // Calculate position as percentage
+            const percentage = (replayCurrentWindowIndex / replayTotalWindows) * 100;
+
+            // Update playhead element if it exists
+            const playhead = document.getElementById('playhead');
+            if (playhead) {
+                playhead.style.left = `${percentage}%`;
+            }
+
+            // Update time display if it exists
+            const currentTimeEl = document.getElementById('currentTime');
+            if (currentTimeEl) {
+                // Estimate time based on window index (each window is ~500ms)
+                const estimatedSeconds = Math.floor(replayCurrentWindowIndex * 0.5);
+                const minutes = Math.floor(estimatedSeconds / 60);
+                const seconds = estimatedSeconds % 60;
+                currentTimeEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            }
         }
 
         // Simulate receiving sensor data (for testing without actual sensors)
