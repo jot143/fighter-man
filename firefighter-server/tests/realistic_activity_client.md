@@ -32,11 +32,11 @@ python realistic_activity_client.py --activity Standing
 # Send JUMPING data without auto session management
 python realistic_activity_client.py --activity Jumping --no-auto-session
 
-# Send BENT_FORWARD data
-python realistic_activity_client.py --activity Bent_Forward --duration 60
+# Send BENT_FORWARD data with custom frequencies
+python realistic_activity_client.py --activity Bent_Forward --duration 60 --foot-hz 5 --accel-hz 10
 
-# Send LYING_DOWN data
-python realistic_activity_client.py --activity Lying_Down
+# Send LYING_DOWN data with low frequency
+python realistic_activity_client.py --activity Lying_Down --foot-hz 1 --accel-hz 2
 ```
 
 ---
@@ -53,10 +53,12 @@ python realistic_activity_client.py --activity Lying_Down
 
 | Parameter           | Type    | Default                 | Description                                          |
 | ------------------- | ------- | ----------------------- | ---------------------------------------------------- |
-| `--server`          | string  | `http://localhost:3000` | Server URL to connect to                             |
-| `--pi-id`           | string  | `test-pi-001`           | Pi ID for this simulated device                      |
+| `--server`          | string  | `http://localhost:4100` | Server URL to connect to                             |
+| `--device-key`      | string  | `firefighter_pi_001`    | Device key for this simulated Pi                     |
 | `--duration`        | integer | None (continuous)       | Duration in seconds to send data                     |
 | `--no-auto-session` | flag    | False                   | Disable automatic session start/end (send data only) |
+| `--foot-hz`         | float   | 2                       | Foot sensor frequency in Hz                          |
+| `--accel-hz`        | float   | 5                       | Accelerometer frequency in Hz                        |
 
 ### Parameter Details
 
@@ -70,13 +72,13 @@ python realistic_activity_client.py --activity Lying_Down
 
 - URL of the firefighter-server
 - Default connects to local development server
-- Example: `--server http://192.168.1.100:3000`
+- Example: `--server http://192.168.1.100:4100`
 
-**`--pi-id`**
+**`--device-key`**
 
-- Identifier for this simulated Raspberry Pi
+- Device key for this simulated Raspberry Pi
 - Useful when testing multiple Pi connections
-- Example: `--pi-id firefighter-01`
+- Example: `--device-key firefighter-01`
 
 **`--duration`**
 
@@ -89,6 +91,18 @@ python realistic_activity_client.py --activity Lying_Down
 - By default, script automatically starts/ends sessions
 - Use this flag to only send sensor data without session management
 - Useful when testing data flow without session lifecycle
+
+**`--foot-hz`**
+
+- Foot sensor data transmission frequency
+- Default: 2Hz (2 readings per second = 60 readings in 30s)
+- Example: `--foot-hz 5` for higher frequency
+
+**`--accel-hz`**
+
+- Accelerometer data transmission frequency
+- Default: 5Hz (5 readings per second = 150 readings in 30s)
+- Example: `--accel-hz 10` for higher frequency
 
 ---
 
@@ -221,16 +235,19 @@ Based on validated thresholds from `archived/accelerator/blue/analyze.py`:
 
 ### Data Generation Rate
 
-- **Frequency:** 10Hz (100ms intervals)
-- **Packets per cycle:** 3 (left foot + right foot + accelerometer)
-- **Total rate:** ~30 packets/second
+- **Foot sensor frequency:** 2Hz (default) - configurable via `--foot-hz`
+- **Accelerometer frequency:** 5Hz (default) - configurable via `--accel-hz`
+- **Total data rate (defaults):** ~7 packets/second
+- **For 30 seconds:** ~60 foot readings + ~150 accel readings = 210 total packets
 
 ### Socket.IO Events
 
-- **Emitted:** `sensor_data` (foot and accelerometer readings)
-- **Emitted:** `start_session` (if auto-session enabled)
-- **Emitted:** `end_session` (if auto-session enabled)
-- **Received:** `command` (from server)
+- **Namespace:** `/iot`
+- **Emitted:** `foot_pressure_data` (foot sensor readings)
+- **Emitted:** `accelerometer_data` (accelerometer readings)
+- **Emitted:** `authenticate` (device authentication)
+- **Received:** `auth_success` / `auth_error` (authentication response)
+- **Received:** `session_started` / `session_stopped` (session lifecycle)
 
 ### Data Format
 
