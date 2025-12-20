@@ -1193,7 +1193,7 @@
                 return `${m}:${s}`;
             };
 
-            document.getElementById('timelineRange').textContent = `${formatTime(0)} — ${formatTime(duration)}`;
+            document.getElementById('timelineRange').textContent = `${formatTime(1)} — ${formatTime(duration)}`;
 
             // Generate timeline markers
             const ruler = document.getElementById('timelineRuler');
@@ -1205,44 +1205,35 @@
                 activityTrack.innerHTML = '';
             }
 
-            // Generate time markers with adaptive interval (like video players)
-            // Determine marker interval based on duration
-            let markerInterval; // seconds between markers
-            if (duration <= 30) {
-                markerInterval = 5;  // Every 5 seconds for videos under 30s
-            } else if (duration <= 120) {
-                markerInterval = 10; // Every 10 seconds for videos under 2 minutes
-            } else if (duration <= 600) {
-                markerInterval = 30; // Every 30 seconds for videos under 10 minutes
-            } else {
-                markerInterval = 60; // Every minute for longer videos
-            }
+            // Generate time markers every second
+            const markerInterval = 1; // Show marker every 1 second
+            const markerCount = Math.ceil(duration) + 1;
 
-            // Calculate number of markers needed
-            const markerCount = Math.ceil(duration / markerInterval) + 1;
-
-            // Generate markers at regular intervals
-            for (let i = 0; i < markerCount; i++) {
-                const timeInSeconds = i * markerInterval;
+            // Generate markers at 1-second intervals (starting from 00:01)
+            for (let i = 1; i < markerCount; i++) {
+                const displayTime = i;  // What to show: 1, 2, 3, ..., 20 (as 00:01, 00:02, etc.)
+                const actualTime = i - 1;  // Actual recording time: 0, 1, 2, ..., 19
 
                 // Don't go past the actual duration
-                if (timeInSeconds > duration) break;
+                if (displayTime > duration) break;
 
                 const marker = document.createElement('div');
                 marker.className = 'absolute flex items-center justify-center border-r border-gray-600 h-full';
 
-                // Position marker at correct percentage
-                const position = (timeInSeconds / duration) * 100;
+                // Position marker based on ACTUAL time (not display time)
+                // Marker "00:01" represents time 0s, so it goes at 0%
+                // Marker "00:15" represents time 14s, so it goes at 70% (14/20)
+                const position = (actualTime / duration) * 100;
                 marker.style.left = `${position}%`;
 
-                // Width of marker cell (distance to next marker)
-                const nextTime = Math.min((i + 1) * markerInterval, duration);
-                const widthInSeconds = nextTime - timeInSeconds;
+                // Width of marker cell (1 second width)
+                const nextActualTime = Math.min(i, duration);
+                const widthInSeconds = nextActualTime - actualTime;
                 const width = (widthInSeconds / duration) * 100;
                 marker.style.width = `${width}%`;
 
-                // Display formatted time
-                marker.innerHTML = `<span class="text-[10px] text-gray-400">${formatTime(timeInSeconds)}</span>`;
+                // Display formatted time (display time, not actual time)
+                marker.innerHTML = `<span class="text-[10px] text-gray-400">${formatTime(displayTime)}</span>`;
 
                 ruler.appendChild(marker);
             }
@@ -1611,7 +1602,8 @@
                 }
             }
 
-            // Calculate position as percentage based on time
+            // Calculate position as percentage based on ACTUAL time
+            // Markers are positioned based on actual time (0, 1, 2, ...) even though they're labeled (00:01, 00:02, ...)
             const percentage = (estimatedSeconds / replaySessionDuration) * 100;
 
             // Debug logging - log every second (when estimatedSeconds changes)
@@ -1646,8 +1638,10 @@
             // Update time display if it exists
             const currentTimeEl = document.getElementById('replayCurrentTime');
             if (currentTimeEl) {
-                const minutes = Math.floor(estimatedSeconds / 60);
-                const seconds = estimatedSeconds % 60;
+                // Add 1 to match timeline that starts at 00:01
+                const displaySeconds = estimatedSeconds + 1;
+                const minutes = Math.floor(displaySeconds / 60);
+                const seconds = displaySeconds % 60;
                 currentTimeEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
             }
         }
