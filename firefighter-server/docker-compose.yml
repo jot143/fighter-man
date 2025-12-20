@@ -4,12 +4,20 @@ services:
     image: qdrant/qdrant:latest
     container_name: firefighter-qdrant
     ports:
-      - "6333:6333"  # REST API
-      - "6334:6334"  # gRPC
+      - "6333:6333" # REST API
+      - "6334:6334" # gRPC
     volumes:
       - ./data/qdrant:/qdrant/storage
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6333/health"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:6333/health",
+        ]
       interval: 5s
       timeout: 5s
       retries: 5
