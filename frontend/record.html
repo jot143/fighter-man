@@ -1602,9 +1602,9 @@
                 }
             }
 
-            // Calculate position as percentage based on ACTUAL time
-            // Markers are positioned based on actual time (0, 1, 2, ...) even though they're labeled (00:01, 00:02, ...)
-            const percentage = (estimatedSeconds / replaySessionDuration) * 100;
+            // Calculate position as percentage - one block ahead of displayed time
+            // If timer shows 00:15, pointer will be at 00:16 marker position
+            const percentage = ((estimatedSeconds + 1) / replaySessionDuration) * 100;
 
             // Debug logging - log every second (when estimatedSeconds changes)
             if (!window.lastLoggedSecond || window.lastLoggedSecond !== estimatedSeconds) {
