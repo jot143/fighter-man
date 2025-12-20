@@ -191,7 +191,13 @@
     "revision_date": "2025-12-19",
     "sensor_model": "WT901BLE67",
     "activities_count": 5,
-    "activities_list": ["Sitting", "Standing", "Bent_Forward", "Lying_Down", "Jumping"],
+    "activities_list": [
+      "Sitting",
+      "Standing",
+      "Bent_Forward",
+      "Lying_Down",
+      "Jumping"
+    ],
     "units": {
       "acceleration": "g (gravity, where 1g = 9.81 m/s²)",
       "gyroscope": "degrees per second (°/s)",
