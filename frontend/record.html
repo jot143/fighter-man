@@ -1205,14 +1205,45 @@
                 activityTrack.innerHTML = '';
             }
 
-            // Generate time markers (every 10 seconds)
-            const markerCount = Math.ceil(duration / 10) + 1;
+            // Generate time markers with adaptive interval (like video players)
+            // Determine marker interval based on duration
+            let markerInterval; // seconds between markers
+            if (duration <= 30) {
+                markerInterval = 5;  // Every 5 seconds for videos under 30s
+            } else if (duration <= 120) {
+                markerInterval = 10; // Every 10 seconds for videos under 2 minutes
+            } else if (duration <= 600) {
+                markerInterval = 30; // Every 30 seconds for videos under 10 minutes
+            } else {
+                markerInterval = 60; // Every minute for longer videos
+            }
+
+            // Calculate number of markers needed
+            const markerCount = Math.ceil(duration / markerInterval) + 1;
+
+            // Generate markers at regular intervals
             for (let i = 0; i < markerCount; i++) {
+                const timeInSeconds = i * markerInterval;
+
+                // Don't go past the actual duration
+                if (timeInSeconds > duration) break;
+
                 const marker = document.createElement('div');
                 marker.className = 'absolute flex items-center justify-center border-r border-gray-600 h-full';
-                marker.style.left = `${(i * 10 / duration) * 100}%`;
-                marker.style.width = `${(10 / duration) * 100}%`;
-                marker.innerHTML = `<span class="text-[10px] text-gray-400">${formatTime(i * 10)}</span>`;
+
+                // Position marker at correct percentage
+                const position = (timeInSeconds / duration) * 100;
+                marker.style.left = `${position}%`;
+
+                // Width of marker cell (distance to next marker)
+                const nextTime = Math.min((i + 1) * markerInterval, duration);
+                const widthInSeconds = nextTime - timeInSeconds;
+                const width = (widthInSeconds / duration) * 100;
+                marker.style.width = `${width}%`;
+
+                // Display formatted time
+                marker.innerHTML = `<span class="text-[10px] text-gray-400">${formatTime(timeInSeconds)}</span>`;
+
                 ruler.appendChild(marker);
             }
 
