@@ -181,6 +181,7 @@ class VectorStore:
         session_id: str,
         sensor_type: str,
         reading: Dict,
+        label: Optional[str] = None,
     ) -> Optional[str]:
         """
         Add a sensor reading, accumulating into windows.
@@ -189,6 +190,7 @@ class VectorStore:
             session_id: Current recording session ID
             sensor_type: "foot" or "accel"
             reading: Sensor reading data
+            label: Optional activity label for this window
 
         Returns:
             Point ID if a window was stored, None otherwise
@@ -206,14 +208,23 @@ class VectorStore:
 
         # Get or create active window
         if session_id not in self._active_windows:
+            print(f"[VectorStore DEBUG] Creating new window for session {session_id} with label: {label}")
             self._active_windows[session_id] = SensorWindow(
                 session_id=session_id,
                 device=reading.get("device", "unknown"),
                 start_time=timestamp_ms,
                 end_time=timestamp_ms,
+                label=label,
             )
 
         window = self._active_windows[session_id]
+
+        # Update label if provided (allows changing activity during recording)
+        if label is not None:
+            print(f"[VectorStore DEBUG] Updating window label to: {label}")
+            window.label = label
+
+        print(f"[VectorStore DEBUG] Window label is now: {window.label}")
 
         # Add reading to appropriate list
         if sensor_type == "foot":

@@ -64,12 +64,6 @@
                 <!-- New Session Controls -->
                 <div class="p-4 border-b border-gray-800">
                     <div class="mb-3">
-                        <label class="text-xs text-gray-500 mb-1 block">Activity Type</label>
-                        <select id="activityType" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-                            <option value="">Loading...</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
                         <label class="text-xs text-gray-500 mb-1 block">Session Name (optional)</label>
                         <input type="text" id="sessionName" placeholder="Auto-generated if empty"
                             class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
@@ -289,11 +283,8 @@
                     <div class="h-8 border-b border-gray-700 flex items-center px-3">
                         <span class="text-[10px] text-gray-400">Time</span>
                     </div>
-                    <div class="h-10 border-b border-gray-700 flex items-center px-3 bg-gray-800">
-                        <span class="text-xs text-gray-300">Foot</span>
-                    </div>
-                    <div class="h-10 border-b border-gray-700 flex items-center px-3 bg-gray-800">
-                        <span class="text-xs text-gray-300">Accel</span>
+                    <div class="h-12 border-b border-gray-700 flex items-center px-3 bg-gray-800">
+                        <span class="text-xs text-gray-300">Activity</span>
                     </div>
                 </div>
 
@@ -304,14 +295,9 @@
                         <!-- Time markers will be generated dynamically -->
                     </div>
 
-                    <!-- Foot Track -->
-                    <div id="footTrack" class="h-10 bg-gray-800 border-b border-gray-700 relative">
-                        <!-- Foot data markers will appear here -->
-                    </div>
-
-                    <!-- Accel Track -->
-                    <div id="accelTrack" class="h-10 bg-gray-800 border-b border-gray-700 relative">
-                        <!-- Accel data markers will appear here -->
+                    <!-- Activity Track -->
+                    <div id="activityTrack" class="h-12 bg-gray-800 border-b border-gray-700 relative">
+                        <!-- Activity segments will appear here -->
                     </div>
 
                     <!-- Playhead -->
@@ -358,7 +344,6 @@
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             initFootBars();
-            loadActivityTypes();
             loadSessions();
 
             // Initialize activity detector
@@ -398,21 +383,6 @@
             for (let i = 0; i < 18; i++) {
                 leftBars.innerHTML += `<div class="w-1 bg-blue-500 sensor-bar" style="height: 5%"></div>`;
                 rightBars.innerHTML += `<div class="w-1 bg-green-500 sensor-bar" style="height: 5%"></div>`;
-            }
-        }
-
-        // Load activity types from API
-        async function loadActivityTypes() {
-            try {
-                const response = await fetch(`${SERVER_URL}/api/activity-types`);
-                const types = await response.json();
-
-                const select = document.getElementById('activityType');
-                select.innerHTML = '<option value="">Select activity (optional)</option>' +
-                    types.map(t => `<option value="${t}">${t}</option>`).join('');
-            } catch (error) {
-                console.error('Failed to load activity types:', error);
-                document.getElementById('activityType').innerHTML = '<option value="">Select activity (optional)</option><option value="Walking">Walking</option>';
             }
         }
 
@@ -541,6 +511,16 @@
                     // Trigger detection on every accel reading
                     const result = activityDetector.detectActivity();
                     updateActivityDisplay(result.activity, result.confidence);
+
+                    // Send detected activity to backend for window labeling (only during recording)
+                    if (isRecording && currentSessionId && result.confidence > 0) {
+                        window.iotSocket.emit('activity_detected', {
+                            session_id: currentSessionId,
+                            activity: result.activity,
+                            confidence: result.confidence,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
                 }
             });
 
@@ -578,6 +558,15 @@
                 <!-- Right Leg -->
                 <rect x="62" y="140" width="16" height="90" rx="8" fill="white" />
             </svg>`
+        };
+
+        // Activity to color mapping for timeline segments
+        const activityColors = {
+            'Sitting': '#22c55e',      // green-500
+            'Standing': '#3b82f6',     // blue-500
+            'Lying_Down': '#f59e0b',   // amber-500
+            'Bent_Forward': '#8b5cf6', // violet-500
+            'Jumping': '#ef4444'       // red-500
         };
 
         // Update the detected activity display
@@ -663,7 +652,6 @@
 
         // Start recording
         async function startRecording() {
-            const activityType = document.getElementById('activityType').value || null;
             const sessionName = document.getElementById('sessionName').value;
 
             try {
@@ -671,8 +659,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        name: sessionName || undefined,
-                        activity_type: activityType
+                        name: sessionName || undefined
                     })
                 });
 
@@ -695,7 +682,7 @@
                 document.getElementById('activityConfidence').textContent = '';
 
                 // Update UI
-                updateRecordingUI(true, activityType);
+                updateRecordingUI(true);
                 startRecordingTimer();
                 // Don't call loadSessions() here - socket event will handle it
 
@@ -962,8 +949,11 @@
                     data.session.name;
                 document.getElementById('selectedActivity').textContent = data.session.activity_type || '-';
 
-                // Update timeline
-                updateTimeline(data.session);
+                // Update timeline with session data and windows
+                updateTimeline({
+                    ...data.session,
+                    windows: data.windows
+                });
 
                 console.log(`Loaded session: ${replayWindows.length} windows (${replayTotalWindows} total)`);
             } catch (error) {
@@ -1060,6 +1050,61 @@
             }
         }
 
+        /**
+         * Group consecutive windows with same label into activity segments
+         * @param {Array} windows - Array of window objects with label, start_time, end_time
+         * @returns {Array} Array of segments: [{label, start_time, end_time}, ...]
+         */
+        function groupActivitySegments(windows) {
+            if (!windows || windows.length === 0) return [];
+
+            const segments = [];
+            let currentSegment = null;
+
+            windows.forEach((window, idx) => {
+                const label = window.label;
+
+                // Debug: Log first few windows to see their labels
+                if (idx < 3) {
+                    console.log(`[Segment] Window ${idx}:`, { label: label, start_time: window.start_time, end_time: window.end_time });
+                }
+
+                // Skip unlabeled windows (gaps)
+                if (!label) {
+                    // If we were building a segment, finish it
+                    if (currentSegment) {
+                        segments.push(currentSegment);
+                        currentSegment = null;
+                    }
+                    return;
+                }
+
+                // Start new segment or extend current one
+                if (!currentSegment || currentSegment.label !== label) {
+                    // Finish previous segment
+                    if (currentSegment) {
+                        segments.push(currentSegment);
+                    }
+                    // Start new segment
+                    currentSegment = {
+                        label: label,
+                        start_time: window.start_time,
+                        end_time: window.end_time
+                    };
+                } else {
+                    // Extend current segment
+                    currentSegment.end_time = window.end_time;
+                }
+            });
+
+            // Don't forget the last segment
+            if (currentSegment) {
+                segments.push(currentSegment);
+            }
+
+            return segments;
+        }
+
         // Update timeline with session data
         function updateTimeline(session) {
             const windows = session.windows || [];
@@ -1083,13 +1128,13 @@
 
             // Generate timeline markers
             const ruler = document.getElementById('timelineRuler');
-            const footTrack = document.getElementById('footTrack');
-            const accelTrack = document.getElementById('accelTrack');
+            const activityTrack = document.getElementById('activityTrack');
 
             // Clear existing content
             ruler.innerHTML = '';
-            footTrack.innerHTML = '';
-            accelTrack.innerHTML = '';
+            if (activityTrack) {
+                activityTrack.innerHTML = '';
+            }
 
             // Generate time markers (every 10 seconds)
             const markerCount = Math.ceil(duration / 10) + 1;
@@ -1102,29 +1147,45 @@
                 ruler.appendChild(marker);
             }
 
-            // Add window markers on tracks
-            windows.forEach((window, idx) => {
-                const windowStart = (new Date(window.start_time) - startTime) / 1000;
-                const left = (windowStart / duration) * 100;
+            // Group windows into activity segments
+            const activitySegments = groupActivitySegments(windows);
+            console.log('[Timeline] Total windows:', windows.length);
+            console.log('[Timeline] Windows with labels:', windows.filter(w => w.label).length);
+            console.log('[Timeline] Activity segments:', activitySegments.length, activitySegments);
 
-                if (window.foot_count > 0) {
-                    const marker = document.createElement('div');
-                    marker.className = 'absolute top-1 h-8 bg-blue-600 rounded opacity-70';
-                    marker.style.left = `${left}%`;
-                    marker.style.width = '4px';
-                    marker.title = `Foot: ${window.foot_count} readings`;
-                    footTrack.appendChild(marker);
-                }
+            // Render activity segments on the activity track
+            if (activityTrack) {
+                activitySegments.forEach(segment => {
+                    const segmentStart = (new Date(segment.start_time) - startTime) / 1000;
+                    const segmentEnd = (new Date(segment.end_time) - startTime) / 1000;
+                    const segmentDuration = segmentEnd - segmentStart;
 
-                if (window.accel_count > 0) {
-                    const marker = document.createElement('div');
-                    marker.className = 'absolute top-1 h-8 bg-orange-600 rounded opacity-70';
-                    marker.style.left = `${left}%`;
-                    marker.style.width = '4px';
-                    marker.title = `Accel: ${window.accel_count} readings`;
-                    accelTrack.appendChild(marker);
-                }
-            });
+                    const left = (segmentStart / duration) * 100;
+                    const width = (segmentDuration / duration) * 100;
+
+                    // Get color for this activity
+                    const color = activityColors[segment.label] || '#6b7280'; // default gray
+
+                    // Create segment bar
+                    const segmentBar = document.createElement('div');
+                    segmentBar.className = 'absolute top-0 h-full flex items-center justify-center text-xs font-medium text-white overflow-hidden';
+                    segmentBar.style.left = `${left}%`;
+                    segmentBar.style.width = `${width}%`;
+                    segmentBar.style.backgroundColor = color;
+                    segmentBar.style.opacity = '0.8';
+
+                    // Add label text inside the bar (only if segment is wide enough)
+                    const minWidthForLabel = 5; // Show label if segment > 5% of timeline
+                    if (width > minWidthForLabel) {
+                        segmentBar.innerHTML = `<span class="px-1 truncate">${segment.label}</span>`;
+                    }
+
+                    // Add tooltip
+                    segmentBar.title = `${segment.label}: ${formatTime(segmentStart)} - ${formatTime(segmentEnd)}`;
+
+                    activityTrack.appendChild(segmentBar);
+                });
+            }
         }
 
         // Replay controls

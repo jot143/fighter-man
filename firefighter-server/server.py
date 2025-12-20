@@ -8,6 +8,7 @@ Provides REST API for session management and data export.
 import os
 import uuid
 from datetime import datetime
+from typing import Dict, Any
 from dotenv import load_dotenv
 
 from flask import Flask, request, jsonify
@@ -49,6 +50,9 @@ session_repo: SessionRepository = None
 
 # Session management
 current_session_id: str = None
+
+# Track currently detected activity per session (from frontend detector)
+detected_activities: Dict[str, Dict[str, Any]] = {}
 
 # Valid activity types for Stage 1
 ACTIVITY_TYPES = [
@@ -147,11 +151,21 @@ def handle_foot_data(data):
     if not current_session_id:
         return  # No active session
 
+    # Get current detected activity from frontend (if available)
+    if current_session_id in detected_activities:
+        detected = detected_activities[current_session_id]
+        activity_label = detected["activity"]
+    else:
+        # Fallback to session activity_type if no detection available
+        repo = get_session_repo()
+        session = repo.get(current_session_id)
+        activity_label = session.activity_type if session else None
+
     store = get_vector_store()
-    point_id = store.add_reading(current_session_id, "foot", data)
+    point_id = store.add_reading(current_session_id, "foot", data, label=activity_label)
 
     if point_id:
-        print(f"[Qdrant] Stored foot window: {point_id}")
+        print(f"[Qdrant] Stored foot window: {point_id} (label: {activity_label})")
 
 
 @socketio.on("accelerometer_data", namespace="/iot")
@@ -176,11 +190,52 @@ def handle_accel_data(data):
     if not current_session_id:
         return  # No active session
 
+    # Get current detected activity from frontend (if available)
+    if current_session_id in detected_activities:
+        detected = detected_activities[current_session_id]
+        activity_label = detected["activity"]
+    else:
+        # Fallback to session activity_type if no detection available
+        repo = get_session_repo()
+        session = repo.get(current_session_id)
+        activity_label = session.activity_type if session else None
+
     store = get_vector_store()
-    point_id = store.add_reading(current_session_id, "accel", data)
+    point_id = store.add_reading(current_session_id, "accel", data, label=activity_label)
 
     if point_id:
-        print(f"[Qdrant] Stored accel window: {point_id}")
+        print(f"[Qdrant] Stored accel window: {point_id} (label: {activity_label})")
+
+
+@socketio.on("activity_detected", namespace="/iot")
+def handle_activity_detected(data):
+    """
+    Handle activity detected from frontend activity detector.
+
+    Expected data: {
+        "session_id": "uuid",
+        "activity": "Standing",
+        "confidence": 85,
+        "timestamp": "ISO datetime"
+    }
+    """
+    global detected_activities
+
+    session_id = data.get("session_id")
+    activity = data.get("activity")
+    confidence = data.get("confidence", 0)
+
+    if not session_id or not activity:
+        return
+
+    # Store current detected activity in memory
+    detected_activities[session_id] = {
+        "activity": activity,
+        "confidence": confidence,
+        "timestamp": datetime.utcnow()
+    }
+
+    print(f"[Activity] Detected: {activity} ({confidence}%) for session {session_id}")
 
 
 # ============================================================
@@ -238,6 +293,12 @@ def create_session():
     session_name = data.get("name", f"recording_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
     activity_type = data.get("activity_type")
 
+    # DEBUG: Log received data
+    print(f"[DEBUG] Received session creation request:")
+    print(f"[DEBUG]   Raw data: {data}")
+    print(f"[DEBUG]   session_name: {session_name}")
+    print(f"[DEBUG]   activity_type: {activity_type}")
+
     # Validate activity_type
     if activity_type and activity_type not in ACTIVITY_TYPES:
         return jsonify({
@@ -257,6 +318,11 @@ def create_session():
     # Create new session
     session = repo.create(name=session_name, activity_type=activity_type)
     current_session_id = session.id
+
+    # DEBUG: Log created session
+    print(f"[DEBUG] Created session object:")
+    print(f"[DEBUG]   session.id: {session.id}")
+    print(f"[DEBUG]   session.activity_type: {session.activity_type}")
 
     print(f"[Session] Created: {session.id} ({session.name}) - Activity: {activity_type}")
 
@@ -374,6 +440,10 @@ def stop_session(session_id):
     store.flush_session(session_id)
 
     updated = repo.update(session_id, status="stopped", stopped_at=datetime.utcnow())
+
+    # Clean up detected activities for this session
+    if session_id in detected_activities:
+        del detected_activities[session_id]
 
     if current_session_id == session_id:
         current_session_id = None
