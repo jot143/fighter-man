@@ -560,6 +560,54 @@ def get_replay_data(session_id):
     })
 
 
+@app.route("/api/sessions/<session_id>/windows", methods=["GET"])
+def get_session_windows_metadata(session_id):
+    """
+    Get all windows metadata for a session (without raw_data).
+
+    Lightweight endpoint for timeline rendering that returns window metadata
+    including labels, timestamps, but excludes heavy raw_data field.
+
+    Returns:
+        [
+            {
+                "window_id": str,
+                "session_id": str,
+                "label": str or null,
+                "start_time": timestamp,
+                "end_time": timestamp,
+                "foot_count": int,
+                "accel_count": int
+            },
+            ...
+        ]
+    """
+    repo = get_session_repo()
+    session = repo.get(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    store = get_vector_store()
+    # Get all windows without raw_data (lightweight)
+    all_windows = store.get_session_data(session_id, include_raw=False)
+
+    # Normalize field names to match frontend expectations
+    normalized = [
+        {
+            "window_id": w.get("id"),
+            "session_id": session_id,
+            "label": w.get("label"),
+            "start_time": w.get("start_time"),
+            "end_time": w.get("end_time"),
+            "foot_count": w.get("foot_count"),
+            "accel_count": w.get("accel_count"),
+        }
+        for w in all_windows
+    ]
+
+    return jsonify(normalized)
+
+
 # ============================================================
 # REST API - Query (Similarity Search)
 # ============================================================

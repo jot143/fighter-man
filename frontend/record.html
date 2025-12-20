@@ -289,7 +289,7 @@
                 </div>
 
                 <!-- Timeline Area -->
-                <div class="flex-1 overflow-x-auto" id="timelineScroll">
+                <div class="flex-1 overflow-x-auto relative" id="timelineScroll">
                     <!-- Ruler -->
                     <div id="timelineRuler" class="h-8 bg-gray-900 border-b border-gray-700 relative">
                         <!-- Time markers will be generated dynamically -->
@@ -301,7 +301,7 @@
                     </div>
 
                     <!-- Playhead -->
-                    <div id="playhead" class="absolute top-0 w-0.5 h-full bg-red-500 z-10 hidden" style="left: 0;">
+                    <div id="playhead" class="absolute top-0 w-0.5 bg-red-500 z-10 hidden pointer-events-none" style="left: 0; height: 100%;">
                         <div class="absolute -top-1 -left-1.5 w-3 h-2 bg-red-500"></div>
                     </div>
                 </div>
@@ -489,8 +489,8 @@
             iotSocket.on('foot_data', (data) => {
                 updateFootDisplay(data);
 
-                // Update activity detector with new foot data (works during recording and replay)
-                if (activityDetector && (isRecording || isReplaying)) {
+                // Update activity detector with new foot data (ONLY during recording)
+                if (activityDetector && isRecording) {
                     activityDetector.updateFootData(data.data);
 
                     // Trigger detection (if we also have accel data)
@@ -504,16 +504,16 @@
             iotSocket.on('accel_data', (data) => {
                 updateAccelDisplay(data);
 
-                // Update activity detector and run detection (works during recording and replay)
-                if (activityDetector && (isRecording || isReplaying)) {
+                // Update activity detector and run detection (ONLY during recording)
+                if (activityDetector && isRecording) {
                     activityDetector.updateAccelData(data.data);
 
                     // Trigger detection on every accel reading
                     const result = activityDetector.detectActivity();
                     updateActivityDisplay(result.activity, result.confidence);
 
-                    // Send detected activity to backend for window labeling (only during recording)
-                    if (isRecording && currentSessionId && result.confidence > 0) {
+                    // Send detected activity to backend for window labeling
+                    if (currentSessionId && result.confidence > 0) {
                         window.iotSocket.emit('activity_detected', {
                             session_id: currentSessionId,
                             activity: result.activity,
@@ -572,6 +572,17 @@
         // Update the detected activity display
         function updateActivityDisplay(activity, confidence) {
             if (!isRecording && !isReplaying) return;
+
+            // Debug logging during replay (throttled to avoid spam)
+            if (isReplaying) {
+                if (!window.lastActivityLog || window.lastActivityLog !== activity) {
+                    // Get current replay time for context
+                    const elapsedMs = replayStartTime ? Date.now() - replayStartTime : 0;
+                    const elapsedSec = Math.floor(elapsedMs / 1000);
+                    console.log('[Activity Detection] At', elapsedSec + 's:', activity, '(' + confidence + '%)');
+                    window.lastActivityLog = activity;
+                }
+            }
 
             // Determine which state is active and get elements from correct container
             let activityLabelEl, confidenceEl, activityIconEl;
@@ -850,14 +861,19 @@
             }
 
             try {
-                // Load first batch of windows with raw data
-                const response = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/replay?offset=0&limit=${replayBatchSize}`);
-                const data = await response.json();
+                // Load first batch of windows with raw data for replay
+                const replayResponse = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/replay?offset=0&limit=${replayBatchSize}`);
+                const replayData = await replayResponse.json();
+
+                // Load ALL windows metadata (without raw_data) for timeline rendering
+                // This is a lightweight call that gets labels for all windows
+                const metadataResponse = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/windows`);
+                const allWindowsMetadata = await metadataResponse.json();
 
                 // Initialize replay state
                 replaySessionId = sessionId;
-                replayWindows = data.windows || [];
-                replayTotalWindows = data.total_windows || 0;
+                replayWindows = replayData.windows || [];
+                replayTotalWindows = replayData.total_windows || 0;
                 replayCurrentWindowIndex = 0;
                 replayReadingIndex = 0;
                 replayStartTime = null;  // Reset replay timer
@@ -884,10 +900,18 @@
                 let totalSeconds = 0;
 
                 // Try using session timestamps first (recording start to stop)
-                if (data.session.created_at && data.session.stopped_at) {
-                    const startTime = new Date(data.session.created_at);
-                    const stopTime = new Date(data.session.stopped_at);
+                if (replayData.session.created_at && replayData.session.stopped_at) {
+                    const startTime = new Date(replayData.session.created_at);
+                    const stopTime = new Date(replayData.session.stopped_at);
                     const sessionDuration = Math.floor((stopTime - startTime) / 1000);
+
+                    console.log('[Duration Calculation] Session timestamps:', {
+                        created_at: replayData.session.created_at,
+                        stopped_at: replayData.session.stopped_at,
+                        startTime: startTime.toISOString(),
+                        stopTime: stopTime.toISOString(),
+                        calculatedDuration: sessionDuration + 's'
+                    });
 
                     // Sanity check: if session was left open for more than 2 hours, use window span instead
                     const MAX_REASONABLE_DURATION = 2 * 60 * 60; // 2 hours in seconds
@@ -895,41 +919,53 @@
                     if (sessionDuration <= MAX_REASONABLE_DURATION) {
                         // Session duration is reasonable, use it
                         totalSeconds = sessionDuration;
+                        console.log('[Duration Calculation] Using session timestamp duration:', totalSeconds + 's');
                     } else {
                         // Session was left open too long, fall back to window span
                         console.warn('[Replay] Session duration exceeds 2 hours, using window span instead');
-                        if (replayWindows.length > 0) {
-                            const firstWindow = replayWindows[0];
-                            const lastWindow = replayWindows[replayWindows.length - 1];
+                        if (allWindowsMetadata.length > 0) {
+                            const firstWindow = allWindowsMetadata[0];
+                            const lastWindow = allWindowsMetadata[allWindowsMetadata.length - 1];
                             if (firstWindow.start_time && lastWindow.end_time) {
                                 const duration_ms = lastWindow.end_time - firstWindow.start_time;
                                 totalSeconds = Math.ceil(duration_ms / 1000);
+                                console.log('[Duration Calculation] Using window span duration:', totalSeconds + 's');
                             }
                         }
                     }
-                } else if (replayWindows.length > 0) {
+                } else if (allWindowsMetadata.length > 0) {
                     // No session timestamps, use window span
-                    const firstWindow = replayWindows[0];
-                    const lastWindow = replayWindows[replayWindows.length - 1];
+                    const firstWindow = allWindowsMetadata[0];
+                    const lastWindow = allWindowsMetadata[allWindowsMetadata.length - 1];
                     if (firstWindow.start_time && lastWindow.end_time) {
                         const duration_ms = lastWindow.end_time - firstWindow.start_time;
                         totalSeconds = Math.ceil(duration_ms / 1000);
+                        console.log('[Duration Calculation] Using window span (no session timestamps):', totalSeconds + 's');
                     } else {
                         // Fallback to window count
                         totalSeconds = Math.floor(replayTotalWindows * 0.5);
+                        console.log('[Duration Calculation] Fallback to window count estimate:', totalSeconds + 's');
                     }
                 } else {
                     // Fallback to window count if no windows loaded yet
                     totalSeconds = Math.floor(replayTotalWindows * 0.5);
+                    console.log('[Duration Calculation] Fallback to window count estimate (no windows):', totalSeconds + 's');
                 }
 
                 // Store for use in playback
                 replaySessionDuration = totalSeconds;
 
                 // Store session start time for timestamp-based playback
-                if (data.session.created_at) {
-                    replaySessionStartTime = new Date(data.session.created_at).getTime();
+                if (replayData.session.created_at) {
+                    replaySessionStartTime = new Date(replayData.session.created_at).getTime();
+                    console.log('[Duration Calculation] Session start time:', replaySessionStartTime, '(' + new Date(replaySessionStartTime).toISOString() + ')');
                 }
+
+                console.log('[Session Load] FINAL VALUES:');
+                console.log('  - replaySessionDuration:', replaySessionDuration, 'seconds');
+                console.log('  - replaySessionStartTime:', replaySessionStartTime, '(' + new Date(replaySessionStartTime).toISOString() + ')');
+                console.log('  - Total windows:', replayTotalWindows);
+                console.log('  - Metadata windows:', allWindowsMetadata.length);
 
                 const totalMinutes = Math.floor(totalSeconds / 60);
                 const totalSecs = totalSeconds % 60;
@@ -944,18 +980,18 @@
                 document.getElementById('idleState').classList.add('hidden');
                 document.getElementById('recordingState').classList.add('hidden');
                 document.getElementById('replayState').classList.remove('hidden');
-                document.getElementById('replaySession').textContent = data.session.activity_type ?
-                    `${data.session.name} - ${data.session.activity_type}` :
-                    data.session.name;
-                document.getElementById('selectedActivity').textContent = data.session.activity_type || '-';
+                document.getElementById('replaySession').textContent = replayData.session.activity_type ?
+                    `${replayData.session.name} - ${replayData.session.activity_type}` :
+                    replayData.session.name;
+                document.getElementById('selectedActivity').textContent = replayData.session.activity_type || '-';
 
-                // Update timeline with session data and windows
+                // Update timeline with session data and ALL windows metadata (not just first batch)
                 updateTimeline({
-                    ...data.session,
-                    windows: data.windows
+                    ...replayData.session,
+                    windows: allWindowsMetadata
                 });
 
-                console.log(`Loaded session: ${replayWindows.length} windows (${replayTotalWindows} total)`);
+                console.log(`Loaded session: ${replayWindows.length} windows for replay (${replayTotalWindows} total), ${allWindowsMetadata.length} windows for timeline`);
             } catch (error) {
                 console.error('Failed to load session:', error);
                 alert('Failed to load session for replay');
@@ -1052,11 +1088,27 @@
 
         /**
          * Group consecutive windows with same label into activity segments
+         *
+         * CRITICAL FIXES (2025-12-20):
+         * 1. Timeline segments now use replaySessionStartTime as reference point (not session.created_at)
+         * 2. Timeline duration now uses replaySessionDuration (not recalculated from timestamps)
+         * 3. This ensures timeline segments align perfectly with playhead position
+         *
          * @param {Array} windows - Array of window objects with label, start_time, end_time
          * @returns {Array} Array of segments: [{label, start_time, end_time}, ...]
          */
         function groupActivitySegments(windows) {
             if (!windows || windows.length === 0) return [];
+
+            console.log('[Segment Grouping] Processing', windows.length, 'windows');
+
+            // Count labels for debugging
+            const labelCounts = {};
+            windows.forEach(w => {
+                const label = w.label || 'unlabeled';
+                labelCounts[label] = (labelCounts[label] || 0) + 1;
+            });
+            console.log('[Segment Grouping] Label distribution:', labelCounts);
 
             const segments = [];
             let currentSegment = null;
@@ -1064,9 +1116,14 @@
             windows.forEach((window, idx) => {
                 const label = window.label;
 
-                // Debug: Log first few windows to see their labels
-                if (idx < 3) {
-                    console.log(`[Segment] Window ${idx}:`, { label: label, start_time: window.start_time, end_time: window.end_time });
+                // Debug: Log first few and last few windows to see their labels
+                if (idx < 5 || idx >= windows.length - 5) {
+                    console.log(`[Segment] Window ${idx}/${windows.length}:`, {
+                        label: label,
+                        start_time: window.start_time,
+                        end_time: window.end_time,
+                        window_id: window.window_id
+                    });
                 }
 
                 // Skip unlabeled windows (gaps)
@@ -1113,9 +1170,21 @@
                 return;
             }
 
-            const startTime = new Date(windows[0]?.start_time || session.created_at);
-            const endTime = new Date(windows[windows.length - 1]?.end_time || session.stopped_at || session.created_at);
-            const duration = (endTime - startTime) / 1000;
+            // CRITICAL: Use the same duration value as playhead to ensure consistency
+            // The playhead uses replaySessionDuration, so timeline MUST use the same value
+            // Otherwise segments and playhead will be misaligned
+            const duration = replaySessionDuration;
+
+            // For reference calculations only (not for positioning)
+            const startTime = new Date(session.created_at);
+            const endTime = new Date(session.stopped_at || session.created_at);
+            const sessionTimestampDuration = (endTime - startTime) / 1000;
+
+            console.log('[Timeline] Using duration:', duration, 'seconds (same as playhead)');
+            console.log('[Timeline] Verification - session timestamp duration:', sessionTimestampDuration, 'seconds');
+            if (Math.abs(duration - sessionTimestampDuration) > 1) {
+                console.warn('[Timeline] WARNING: Duration mismatch! Timeline duration:', duration, 'vs session timestamps:', sessionTimestampDuration);
+            }
 
             // Update time range display
             const formatTime = (seconds) => {
@@ -1153,15 +1222,37 @@
             console.log('[Timeline] Windows with labels:', windows.filter(w => w.label).length);
             console.log('[Timeline] Activity segments:', activitySegments.length, activitySegments);
 
+            // Debug: Show segment details
+            activitySegments.forEach((seg, idx) => {
+                const segStart = (new Date(seg.start_time) - startTime) / 1000;
+                const segEnd = (new Date(seg.end_time) - startTime) / 1000;
+                console.log(`[Timeline] Segment ${idx}: ${seg.label} from ${segStart.toFixed(1)}s to ${segEnd.toFixed(1)}s`);
+            });
+
             // Render activity segments on the activity track
             if (activityTrack) {
-                activitySegments.forEach(segment => {
-                    const segmentStart = (new Date(segment.start_time) - startTime) / 1000;
-                    const segmentEnd = (new Date(segment.end_time) - startTime) / 1000;
+                activitySegments.forEach((segment, idx) => {
+                    // CRITICAL: Calculate segment position relative to SESSION START TIME (replaySessionStartTime)
+                    // This must match how playhead calculates its position
+                    const segmentStart = (segment.start_time - replaySessionStartTime) / 1000;
+                    const segmentEnd = (segment.end_time - replaySessionStartTime) / 1000;
                     const segmentDuration = segmentEnd - segmentStart;
 
                     const left = (segmentStart / duration) * 100;
                     const width = (segmentDuration / duration) * 100;
+
+                    // Debug logging for segment positioning
+                    console.log(`[Timeline Segment ${idx}] "${segment.label}":`, {
+                        startTime: segmentStart.toFixed(2) + 's',
+                        endTime: segmentEnd.toFixed(2) + 's',
+                        duration: segmentDuration.toFixed(2) + 's',
+                        position: left.toFixed(2) + '%',
+                        width: width.toFixed(2) + '%',
+                        totalDuration: duration + 's',
+                        rawStartTime: segment.start_time,
+                        rawEndTime: segment.end_time,
+                        sessionStartTime: replaySessionStartTime
+                    });
 
                     // Get color for this activity
                     const color = activityColors[segment.label] || '#6b7280'; // default gray
@@ -1246,6 +1337,12 @@
             isReplaying = true;
             document.getElementById('playPauseBtn').textContent = '⏸';
 
+            // Show playhead during replay
+            const playhead = document.getElementById('playhead');
+            if (playhead) {
+                playhead.classList.remove('hidden');
+            }
+
             // Track replay start time for elapsed time calculation
             // Adjust start time to account for already-elapsed time (for pause/resume continuity)
             replayStartTime = Date.now() - replayPausedElapsedTime;
@@ -1275,6 +1372,13 @@
 
             isReplaying = false;
             document.getElementById('playPauseBtn').textContent = '▶';
+
+            // Hide playhead when paused
+            const playhead = document.getElementById('playhead');
+            if (playhead) {
+                playhead.classList.add('hidden');
+            }
+
             if (replayTimer) {
                 clearInterval(replayTimer);
                 replayTimer = null;
@@ -1297,6 +1401,14 @@
             if (replaySessionDuration > 0 && replayStartTime) {
                 const elapsedMs = Date.now() - replayStartTime;
                 const elapsedSeconds = elapsedMs / 1000;
+
+                // Debug log every 2 seconds during playback
+                if (!window.lastPlaybackLog || (elapsedSeconds - window.lastPlaybackLog) >= 2) {
+                    console.log('[Playback] Elapsed:', elapsedSeconds.toFixed(2) + 's of', replaySessionDuration + 's',
+                        '| Window:', replayCurrentWindowIndex, '/', replayTotalWindows,
+                        '| Reading:', replayReadingIndex);
+                    window.lastPlaybackLog = Math.floor(elapsedSeconds / 2) * 2; // Log every 2 seconds
+                }
 
                 if (elapsedSeconds >= replaySessionDuration) {
                     // Update playhead one final time to show the complete duration
@@ -1328,6 +1440,16 @@
                 // Calculate current elapsed replay time
                 const elapsedMs = Date.now() - replayStartTime;
                 const elapsedSec = elapsedMs / 1000;
+
+                // Debug log window timing (only for first reading of each window)
+                if (replayReadingIndex === 0) {
+                    console.log('[Window Timing] Window', replayCurrentWindowIndex + ':', {
+                        windowOffsetSec: windowOffsetSec.toFixed(2) + 's',
+                        elapsedSec: elapsedSec.toFixed(2) + 's',
+                        delta: (elapsedSec - windowOffsetSec).toFixed(2) + 's',
+                        shouldPlay: elapsedSec >= windowOffsetSec
+                    });
+                }
 
                 // If we haven't reached this window's time yet, skip it
                 if (elapsedSec < windowOffsetSec) {
@@ -1386,26 +1508,26 @@
             if (replayReadingIndex < footReadings.length) {
                 const footReading = footReadings[replayReadingIndex];
                 updateFootDisplay(footReading);
-
-                // Update activity detector with foot data during replay
-                if (activityDetector && footReading.data) {
-                    activityDetector.updateFootData(footReading.data);
-                }
             }
 
             if (replayReadingIndex < accelReadings.length) {
                 const accelReading = accelReadings[replayReadingIndex];
                 updateAccelDisplay(accelReading);
+            }
 
-                // Update activity detector and run detection
-                if (activityDetector && accelReading.data) {
-                    activityDetector.updateAccelData(accelReading.data);
-
-                    // Run detection after accel update (accel is primary trigger)
-                    const result = activityDetector.detectActivity();
-                    if (result.confidence > 0) {
-                        updateActivityDisplay(result.activity, result.confidence);
-                    }
+            // Display stored activity label from window (instead of running detection)
+            // Only update on first reading of each window to avoid flicker
+            if (replayReadingIndex === 0) {
+                if (currentWindow.label) {
+                    // Use stored label from database (ground truth from original recording)
+                    updateActivityDisplay(currentWindow.label, 100);
+                    console.log('[Replay] Displaying stored label:', currentWindow.label, 'for window at',
+                        Math.floor((currentWindow.start_time - replaySessionStartTime) / 1000) + 's');
+                } else {
+                    // No label stored - show "Unknown" to indicate gap
+                    updateActivityDisplay('Unknown', 0);
+                    console.log('[Replay] No label stored for window at',
+                        Math.floor((currentWindow.start_time - replaySessionStartTime) / 1000) + 's');
                 }
             }
 
@@ -1436,8 +1558,16 @@
         }
 
         // Update playhead position on timeline
+        //
+        // DEBUG: This function positions the playhead based on elapsed replay time
+        // Expected behavior: At 12 seconds of a 24 second session, playhead should be at 50%
+        // Actual playhead position is set via: playhead.style.left = `${percentage}%`
+        // The percentage is calculated as: (estimatedSeconds / replaySessionDuration) * 100
         function updatePlayhead() {
-            if (replaySessionDuration === 0) return;
+            if (replaySessionDuration === 0) {
+                console.warn('[Playhead] replaySessionDuration is 0, cannot position playhead');
+                return;
+            }
 
             // Calculate elapsed time since replay started
             let estimatedSeconds = 0;
@@ -1453,10 +1583,33 @@
             // Calculate position as percentage based on time
             const percentage = (estimatedSeconds / replaySessionDuration) * 100;
 
+            // Debug logging - log every second (when estimatedSeconds changes)
+            if (!window.lastLoggedSecond || window.lastLoggedSecond !== estimatedSeconds) {
+                console.log('[Playhead] Position:', percentage.toFixed(2) + '%', 'at', estimatedSeconds, 'seconds',
+                    '| Calculation:', estimatedSeconds, '/', replaySessionDuration, '=', percentage.toFixed(2) + '%',
+                    '| Expected at 50%:', (replaySessionDuration * 0.5).toFixed(1) + 's');
+                window.lastLoggedSecond = estimatedSeconds;
+            }
+
             // Update playhead element if it exists
             const playhead = document.getElementById('playhead');
             if (playhead) {
+                // Playhead is positioned relative to #timelineScroll container
+                // Use percentage-based positioning (0% = start, 100% = end)
                 playhead.style.left = `${percentage}%`;
+
+                // Get the actual computed position for verification
+                const timelineScroll = document.getElementById('timelineScroll');
+                if (timelineScroll && (!window.lastLoggedPlayheadPosition || window.lastLoggedPlayheadPosition !== estimatedSeconds)) {
+                    const scrollWidth = timelineScroll.scrollWidth;
+                    const expectedPixels = (percentage / 100) * scrollWidth;
+                    console.log('[Playhead] DOM updated: style.left =', playhead.style.left,
+                        '| Timeline width:', scrollWidth + 'px',
+                        '| Expected position:', expectedPixels.toFixed(1) + 'px from left');
+                    window.lastLoggedPlayheadPosition = estimatedSeconds;
+                }
+            } else {
+                console.warn('[Playhead] Element not found');
             }
 
             // Update time display if it exists
