@@ -36,8 +36,85 @@
             background: rgba(59, 130, 246, 0.2);
             border-left: 3px solid #3b82f6;
         }
+
+        #video-container {
+            position: relative;
+            max-width: 640px;
+            max-height: 480px;
+            margin: 0 auto 2rem;
+        }
+
+        #video-preview {
+            width: 100%;
+            height: auto;
+            border-radius: 8px;
+            background: #000;
+            transform: scaleX(-1); /* Mirror the video */
+        }
+
+        #recording-indicator {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            background: rgba(239, 68, 68, 0.9);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #recording-indicator .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: white;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        #upload-progress {
+            position: absolute;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 12px 24px;
+            border-radius: 8px;
+            min-width: 300px;
+        }
+
+        #video-upload-progress {
+            width: 100%;
+            height: 4px;
+            margin-bottom: 8px;
+        }
+
+        #replay-video-container {
+            position: relative;
+            max-width: 640px;
+            max-height: 480px;
+            margin: 0 auto 2rem;
+        }
+
+        #replay-video {
+            width: 100%;
+            height: auto;
+            border-radius: 8px;
+            background: #000;
+        }
+
+        .video-unavailable {
+            text-align: center;
+            padding: 2rem;
+            color: #9ca3af;
+            font-size: 14px;
+        }
     </style>
     <script src="js/activityDetector.js"></script>
+    <script src="js/videoRecorder.js"></script>
 </head>
 
 <body class="text-gray-200">
@@ -89,6 +166,19 @@
             <!-- Center - Recording Info / Video Placeholder -->
             <div class="flex-1 flex flex-col bg-gradient-to-b from-gray-900 to-black">
                 <div class="flex-1 flex items-center justify-center p-8">
+                    <!-- Video Container -->
+                    <div id="video-container" class="hidden">
+                        <video id="video-preview" autoplay muted playsinline></video>
+                        <div id="recording-indicator" class="hidden">
+                            <div class="dot"></div>
+                            <span>REC</span>
+                        </div>
+                        <div id="upload-progress" class="hidden">
+                            <progress id="video-upload-progress" value="0" max="100"></progress>
+                            <div id="upload-status" class="text-sm text-center text-white">Uploading video...</div>
+                        </div>
+                    </div>
+
                     <div id="centerContent" class="text-center">
                         <!-- Idle State -->
                         <div id="idleState">
@@ -130,31 +220,67 @@
                         </div>
 
                         <!-- Replay State -->
-                        <div id="replayState" class="hidden">
-                            <div class="text-6xl mb-4">▶️</div>
-                            <h2 class="text-2xl font-semibold mb-2">Replay Mode</h2>
-                            <div id="replaySession" class="text-xl text-blue-400 mb-4"></div>
-                            <div id="detectedActivityContainer" class="mb-4">
-                                <div class="text-sm text-gray-500 mb-1">Detected Activity:</div>
-                                <!-- SVG Icon Container -->
-                                <div id="activityIconContainer" class="flex justify-center mb-2">
-                                    <div id="activityIcon" style="display: none;"></div>
+                        <div id="replayState" class="hidden w-full flex items-center justify-center gap-8">
+                            <!-- Left Side: Video Player or Placeholder -->
+                            <div class="flex-shrink-0">
+                                <!-- Video Playback (shown when video available) -->
+                                <div id="replay-video-container" class="hidden">
+                                    <video id="replay-video" controls class="rounded-lg" style="max-width: 640px; max-height: 480px;"></video>
                                 </div>
-                                <div id="detectedActivity" class="text-xl">
-                                    <span id="activityLabel" class="text-green-400 font-semibold">Waiting...</span>
-                                    <span id="activityConfidence" class="text-lg text-gray-400 ml-2"></span>
+
+                                <!-- No-Video Placeholder (shown when no video) -->
+                                <div id="replay-no-video" class="hidden bg-gray-900 rounded-lg flex items-center justify-center" style="width: 640px; height: 480px;">
+                                    <div class="text-center">
+                                        <div class="text-8xl mb-4">▶️</div>
+                                        <h2 class="text-2xl font-semibold text-gray-400">Replay Mode</h2>
+                                        <p class="text-gray-500 mt-2">No video available</p>
+                                    </div>
                                 </div>
-                                <div class="text-sm text-gray-500 mt-1">Session Activity: <span id="selectedActivity" class="text-blue-400">-</span></div>
                             </div>
-                            <div id="replayTime" class="text-lg text-gray-400 mb-3 font-mono">
-                                <span id="replayCurrentTime">00:00</span>
-                                <span class="text-gray-600"> / </span>
-                                <span id="replayTotalTime">00:00</span>
-                            </div>
-                            <div class="flex items-center justify-center gap-4">
-                                <button onclick="replayControl('prev')" class="p-2 bg-gray-800 rounded hover:bg-gray-700">⏮</button>
-                                <button onclick="replayControl('play')" id="playPauseBtn" class="p-3 bg-blue-600 rounded hover:bg-blue-700">▶</button>
-                                <button onclick="replayControl('next')" class="p-2 bg-gray-800 rounded hover:bg-gray-700">⏭</button>
+
+                            <!-- Right Side: Session Info -->
+                            <div class="flex flex-col items-center justify-center">
+                                <!-- Playback Indicator (blue circle like recording red circle) -->
+                                <div class="text-6xl mb-4">
+                                    <div class="w-16 h-16 rounded-full bg-blue-500 mx-auto"></div>
+                                </div>
+
+                                <!-- Title -->
+                                <h2 class="text-2xl font-semibold mb-2">Replaying...</h2>
+
+                                <!-- Session Name -->
+                                <div id="replaySessionName" class="text-xl text-blue-400 mb-4"></div>
+
+                                <!-- Activity Detection -->
+                                <div class="mb-4">
+                                    <div class="text-sm text-gray-500 mb-1">Detected Activity:</div>
+                                    <!-- SVG Icon Container -->
+                                    <div id="activityIconContainer" class="flex justify-center mb-2">
+                                        <div id="activityIcon" style="display: none;"></div>
+                                    </div>
+                                    <div id="detectedActivity" class="text-xl text-center">
+                                        <span id="activityLabel" class="text-green-400 font-semibold">Waiting...</span>
+                                        <span id="activityConfidence" class="text-lg text-gray-400 ml-2"></span>
+                                    </div>
+                                    <div class="text-sm text-gray-500 mt-1 text-center">Session Activity: <span id="selectedActivity" class="text-blue-400">-</span></div>
+                                </div>
+
+                                <!-- Stats Row (Duration, Foot Readings, Accel Readings) -->
+                                <div class="flex items-center justify-center gap-8 text-sm text-gray-400 mb-4">
+                                    <div class="text-center">
+                                        <span class="text-2xl font-mono text-white block" id="replayCurrentTime">00:00</span>
+                                        <div class="text-xs mt-1">
+                                            <span id="replayTotalTime">00:00</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Playback Controls -->
+                                <div class="flex items-center justify-center gap-4">
+                                    <button onclick="replayControl('prev')" class="p-2 bg-gray-800 rounded hover:bg-gray-700">⏮</button>
+                                    <button onclick="replayControl('play')" id="playPauseBtn" class="p-3 bg-blue-600 rounded hover:bg-blue-700">▶</button>
+                                    <button onclick="replayControl('next')" class="p-2 bg-gray-800 rounded hover:bg-gray-700">⏭</button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -341,6 +467,9 @@
         // Activity detection
         let activityDetector = null;      // Activity detector instance
 
+        // Video recording
+        let videoRecorder = null;         // Video recorder instance
+
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             initFootBars();
@@ -348,6 +477,15 @@
 
             // Initialize activity detector
             activityDetector = new ActivityDetector();
+
+            // Initialize video recorder if supported
+            if (VideoRecorder.isSupported()) {
+                videoRecorder = new VideoRecorder();
+                console.log('[Video] VideoRecorder initialized');
+            } else {
+                console.warn('[Video] Video recording not supported in this browser');
+            }
+
             connectSocket();
             checkActiveSession();
         });
@@ -666,6 +804,17 @@
             const sessionName = document.getElementById('sessionName').value;
 
             try {
+                // Initialize video camera if available
+                if (videoRecorder) {
+                    try {
+                        await videoRecorder.init('video-preview');
+                        console.log('[Video] Camera initialized');
+                    } catch (error) {
+                        console.warn('[Video] Camera initialization failed:', error.message);
+                        // Continue without video
+                    }
+                }
+
                 const response = await fetch(`${SERVER_URL}/api/sessions`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -684,6 +833,16 @@
                 recordingStartTime = Date.now();
                 footReadingCount = 0;
                 accelReadingCount = 0;
+
+                // Start video recording
+                if (videoRecorder && videoRecorder.stream) {
+                    try {
+                        await videoRecorder.startRecording(session.id);
+                        console.log('[Video] Recording started');
+                    } catch (error) {
+                        console.warn('[Video] Failed to start recording:', error.message);
+                    }
+                }
 
                 // Reset activity detector
                 if (activityDetector) {
@@ -708,8 +867,11 @@
         async function stopRecording() {
             if (!currentSessionId) return;
 
+            const sessionId = currentSessionId;
+
             try {
-                const response = await fetch(`${SERVER_URL}/api/sessions/${currentSessionId}/stop`, {
+                // Stop server-side session
+                const response = await fetch(`${SERVER_URL}/api/sessions/${sessionId}/stop`, {
                     method: 'POST'
                 });
 
@@ -726,6 +888,49 @@
                 }
 
                 updateRecordingUI(false);
+
+                // Stop and upload video
+                if (videoRecorder && videoRecorder.getState() === 'recording') {
+                    try {
+                        console.log('[Video] Stopping recording...');
+                        await videoRecorder.stopRecording();
+
+                        // Show upload progress UI
+                        const uploadProgress = document.getElementById('upload-progress');
+                        const uploadProgressBar = document.getElementById('video-upload-progress');
+                        const uploadStatus = document.getElementById('upload-status');
+                        uploadProgress.classList.remove('hidden');
+                        uploadStatus.textContent = 'Uploading video...';
+
+                        console.log('[Video] Uploading...');
+                        await videoRecorder.uploadVideoWithProgress(sessionId, (percent, loaded, total) => {
+                            uploadProgressBar.value = percent;
+                            uploadStatus.textContent = `Uploading video... ${percent.toFixed(1)}%`;
+                        });
+
+                        uploadStatus.textContent = 'Upload complete!';
+                        console.log('[Video] Upload successful');
+
+                        // Hide progress after 2 seconds
+                        setTimeout(() => {
+                            uploadProgress.classList.add('hidden');
+                            videoRecorder.destroy();
+                        }, 2000);
+
+                    } catch (error) {
+                        console.error('[Video] Upload failed:', error.message);
+                        const uploadStatus = document.getElementById('upload-status');
+                        uploadStatus.textContent = 'Upload failed: ' + error.message;
+                        // Allow user to see error message
+                        setTimeout(() => {
+                            document.getElementById('upload-progress').classList.add('hidden');
+                            if (videoRecorder) videoRecorder.destroy();
+                        }, 5000);
+                    }
+                } else if (videoRecorder) {
+                    videoRecorder.destroy();
+                }
+
                 // Don't call loadSessions() here - socket event will handle it
 
                 console.log('Recording stopped');
@@ -742,6 +947,8 @@
             const idleState = document.getElementById('idleState');
             const recordingState = document.getElementById('recordingState');
             const replayState = document.getElementById('replayState');
+            const videoContainer = document.getElementById('video-container');
+            const recordingIndicator = document.getElementById('recording-indicator');
 
             if (recording) {
                 btn.innerHTML = `
@@ -754,6 +961,12 @@
                 replayState.classList.add('hidden');
                 recordingState.classList.remove('hidden');
                 document.getElementById('selectedActivity').textContent = activityType;
+
+                // Show video preview and recording indicator
+                if (videoRecorder && videoRecorder.stream) {
+                    videoContainer.classList.remove('hidden');
+                    recordingIndicator.classList.remove('hidden');
+                }
             } else {
                 btn.innerHTML = `
                     <span class="w-3 h-3 rounded-full bg-white"></span>
@@ -764,6 +977,10 @@
                 idleState.classList.remove('hidden');
                 recordingState.classList.add('hidden');
                 replayState.classList.add('hidden');
+
+                // Hide video preview and recording indicator
+                videoContainer.classList.add('hidden');
+                recordingIndicator.classList.add('hidden');
             }
         }
 
@@ -980,10 +1197,32 @@
                 document.getElementById('idleState').classList.add('hidden');
                 document.getElementById('recordingState').classList.add('hidden');
                 document.getElementById('replayState').classList.remove('hidden');
-                document.getElementById('replaySession').textContent = replayData.session.activity_type ?
+                document.getElementById('selectedActivity').textContent = replayData.session.activity_type || '-';
+
+                // Load video if available and show/hide appropriate layout
+                const replayVideoContainer = document.getElementById('replay-video-container');
+                const replayNoVideo = document.getElementById('replay-no-video');
+                const replayVideo = document.getElementById('replay-video');
+
+                // Populate session name (used in right sidebar)
+                const sessionDisplayName = replayData.session.activity_type ?
                     `${replayData.session.name} - ${replayData.session.activity_type}` :
                     replayData.session.name;
-                document.getElementById('selectedActivity').textContent = replayData.session.activity_type || '-';
+                document.getElementById('replaySessionName').textContent = sessionDisplayName;
+
+                if (replayData.session.video_file_path) {
+                    // Session has video - show video container, hide no-video placeholder
+                    replayVideo.src = `${SERVER_URL}/api/sessions/${sessionId}/video`;
+                    replayVideoContainer.classList.remove('hidden');
+                    replayNoVideo.classList.add('hidden');
+                    console.log('[Video] Loaded video for replay:', replayData.session.video_file_path);
+                } else {
+                    // No video available - show no-video placeholder, hide video container
+                    replayVideo.src = '';
+                    replayVideoContainer.classList.add('hidden');
+                    replayNoVideo.classList.remove('hidden');
+                    console.log('[Video] No video available for this session');
+                }
 
                 // Update timeline with session data and ALL windows metadata (not just first batch)
                 updateTimeline({
@@ -1319,6 +1558,9 @@
                         replayCurrentWindowIndex--;
                         replayReadingIndex = 0;
                         console.log(`Previous window: ${replayCurrentWindowIndex}`);
+
+                        // Update video time to match jump
+                        syncVideoToCurrentPosition();
                     }
                     break;
                 case 'next':
@@ -1330,9 +1572,35 @@
 
                         // Check if we need to preload
                         checkPreload();
+
+                        // Update video time to match jump
+                        syncVideoToCurrentPosition();
                     }
                     break;
             }
+        }
+
+        // Synchronize video to current replay position
+        function syncVideoToCurrentPosition() {
+            if (!replaySessionStartTime) return;
+
+            const replayVideo = document.getElementById('replay-video');
+            if (!replayVideo || !replayVideo.src) return;
+
+            // Calculate current position in seconds from session start
+            // Use the elapsed time calculation similar to updatePlayhead
+            let estimatedSeconds = 0;
+            if (replayStartTime) {
+                const elapsedMs = Date.now() - replayStartTime;
+                estimatedSeconds = Math.floor(elapsedMs / 1000);
+                if (estimatedSeconds > replaySessionDuration) {
+                    estimatedSeconds = replaySessionDuration;
+                }
+            }
+
+            // Seek video to this position
+            replayVideo.currentTime = estimatedSeconds;
+            console.log('[Video] Jumped to', estimatedSeconds, 'seconds');
         }
 
         function startReplay() {
@@ -1374,6 +1642,14 @@
                 activityDetector.reset();
             }
 
+            // Play video if available
+            const replayVideo = document.getElementById('replay-video');
+            if (replayVideo && replayVideo.src) {
+                replayVideo.play().catch(err => {
+                    console.warn('[Video] Playback failed:', err.message);
+                });
+            }
+
             // Start playback loop
             // Calculate interval based on replay speed (default 100ms for 10Hz playback)
             const baseInterval = 100; // ms
@@ -1404,6 +1680,12 @@
             if (replayTimer) {
                 clearInterval(replayTimer);
                 replayTimer = null;
+            }
+
+            // Pause video if available
+            const replayVideo = document.getElementById('replay-video');
+            if (replayVideo && replayVideo.src) {
+                replayVideo.pause();
             }
 
             // Clear activity detector state when pausing
@@ -1635,14 +1917,27 @@
                 console.warn('[Playhead] Element not found');
             }
 
-            // Update time display if it exists
+            // Update time display
+            const displaySeconds = estimatedSeconds + 1;
+            const minutes = Math.floor(displaySeconds / 60);
+            const seconds = displaySeconds % 60;
+            const timeString = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+
             const currentTimeEl = document.getElementById('replayCurrentTime');
             if (currentTimeEl) {
-                // Add 1 to match timeline that starts at 00:01
-                const displaySeconds = estimatedSeconds + 1;
-                const minutes = Math.floor(displaySeconds / 60);
-                const seconds = displaySeconds % 60;
-                currentTimeEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                currentTimeEl.textContent = timeString;
+            }
+
+            // Sync video playback only if there's a large drift
+            const replayVideo = document.getElementById('replay-video');
+            if (replayVideo && replayVideo.src && !replayVideo.paused) {
+                // Only sync if video has drifted significantly (>2 seconds)
+                // This prevents constant seeking which causes pause-play stutter
+                const timeDiff = Math.abs(replayVideo.currentTime - estimatedSeconds);
+                if (timeDiff > 2.0) {
+                    replayVideo.currentTime = estimatedSeconds;
+                    console.log('[Video] Large drift detected, synced to', estimatedSeconds, 'seconds');
+                }
             }
         }
 
