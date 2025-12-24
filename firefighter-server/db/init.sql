@@ -6,7 +6,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     stopped_at TIMESTAMP WITH TIME ZONE,
     status VARCHAR(20) NOT NULL DEFAULT 'recording',
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    video_file_path TEXT DEFAULT NULL,
+    video_duration_seconds REAL DEFAULT NULL,
+    video_size_bytes INTEGER DEFAULT NULL
 );
 
 -- Indexes for query performance

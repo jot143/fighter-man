@@ -4,7 +4,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime
 
-from sqlalchemy import create_engine, Column, String, DateTime, Index, func, text
+from sqlalchemy import create_engine, Column, String, DateTime, Integer, Float, Text, Index, func, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from lib.config import PostgresConfig
@@ -23,6 +23,9 @@ class Session(Base):
     stopped_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(String(20), nullable=False, default="recording")
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+    video_file_path = Column(Text, nullable=True)
+    video_duration_seconds = Column(Float, nullable=True)
+    video_size_bytes = Column(Integer, nullable=True)
 
     __table_args__ = (
         Index("idx_sessions_status", "status"),
@@ -40,6 +43,9 @@ class Session(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "stopped_at": self.stopped_at.isoformat() if self.stopped_at else None,
             "status": self.status,
+            "video_file_path": self.video_file_path,
+            "video_duration_seconds": self.video_duration_seconds,
+            "video_size_bytes": self.video_size_bytes,
         }
 
 
@@ -137,7 +143,8 @@ class SessionRepository:
                 db_session.expunge(session)
             return session
 
-    def update(self, session_id, name=None, status=None, stopped_at=None):
+    def update(self, session_id, name=None, status=None, stopped_at=None,
+               video_file_path=None, video_duration_seconds=None, video_size_bytes=None):
         """Update session fields."""
         with self.db.get_session() as db_session:
             session = db_session.query(Session).filter(Session.id == session_id).first()
@@ -149,6 +156,12 @@ class SessionRepository:
                 session.status = status
             if stopped_at is not None:
                 session.stopped_at = stopped_at
+            if video_file_path is not None:
+                session.video_file_path = video_file_path
+            if video_duration_seconds is not None:
+                session.video_duration_seconds = video_duration_seconds
+            if video_size_bytes is not None:
+                session.video_size_bytes = video_size_bytes
             db_session.flush()
             db_session.refresh(session)
             db_session.expunge(session)
