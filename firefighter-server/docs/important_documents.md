@@ -31,6 +31,7 @@ The Firefighter Server is a real-time data collection and storage system designe
 | Vector Database | Qdrant (Docker) |
 | Data Processing | NumPy |
 | Production Server | Gunicorn + Eventlet |
+| Video Codec | WebM (VP9/VP8) |
 
 ### Architecture
 
@@ -45,13 +46,20 @@ The Firefighter Server is a real-time data collection and storage system designe
 │          │        │  │             │  │  (Qdrant)   │  │
 └──────────┘        │  └─────────────┘  └─────────────┘  │
                     │         │                │         │
+┌──────────┐        │         ▼                ▼         │
+│ Browser  │  HTTP  │  ┌─────────────────────────────┐  │
+│ (Video)  │───────▶│  │        REST API             │  │
+│          │ Upload │  │  /api/sessions, /api/video  │  │
+└──────────┘        │  │                             │  │
+                    │  └─────────────────────────────┘  │
+                    │         │                │         │
                     │         ▼                ▼         │
-┌──────────┐        │  ┌─────────────────────────────┐  │
-│          │  REST  │  │                             │  │
-│ Annotation│◀──────│  │        REST API             │  │
-│   Tool   │  API   │  │  /api/sessions, /api/query  │  │
-│          │        │  │                             │  │
-└──────────┘        │  └─────────────────────────────┘  │
+┌──────────┐        │  ┌─────────────┐  ┌─────────────┐  │
+│          │  REST  │  │             │  │             │  │
+│ Annotation│◀──────│  │  PostgreSQL │  │ File System │  │
+│   Tool   │  API   │  │  (Metadata) │  │   (Videos)  │  │
+│          │        │  │             │  │             │  │
+└──────────┘        │  └─────────────┘  └─────────────┘  │
                     │                                     │
                     └─────────────────────────────────────┘
 ```
@@ -111,6 +119,27 @@ The Firefighter Server is a real-time data collection and storage system designe
    - Finding unlabeled data similar to labeled examples
    - Detecting anomalies
    - Quality checking annotations
+
+### Use Case 5: Video Recording and Synchronization
+
+**Actor:** Browser-based frontend, Training operator
+**Description:** Record synchronized video during training sessions
+
+**Flow:**
+1. Operator opens recording UI in browser
+2. Browser requests camera access via MediaRecorder API
+3. Operator creates session via REST API
+4. Video recording starts simultaneously with sensor streaming
+5. Session recorded with both sensor data and video
+6. Video stops and uploads to server on session stop
+7. Video file stored on filesystem, path stored in PostgreSQL
+8. During replay, video plays synchronized with sensor timeline
+
+**Benefits:**
+- Visual validation of sensor data
+- Activity labeling reference (see what firefighter was actually doing)
+- Training review and analysis
+- Future ML integration: pose detection from video
 
 ---
 
@@ -484,6 +513,82 @@ Content-Type: application/json
 
 ---
 
+### Video Management
+
+#### Upload Video
+
+```http
+POST /api/sessions/:id/upload-video
+Content-Type: multipart/form-data
+
+video=@recording.webm
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "video_file_path": "550e8400-e29b-41d4-a716-446655440000.webm",
+  "size_bytes": 12582912
+}
+```
+
+**Example:**
+```bash
+# Upload video for session
+curl -X POST http://localhost:4100/api/sessions/{session_id}/upload-video \
+  -F "video=@recording.webm"
+
+# Response
+{
+  "success": true,
+  "video_file_path": "550e8400-e29b-41d4-a716-446655440000.webm",
+  "size_bytes": 12582912
+}
+```
+
+#### Stream Video
+
+```http
+GET /api/sessions/:id/video
+Range: bytes=0-1024  (optional)
+```
+
+**Response (200 Full Video):**
+```
+Content-Type: video/webm
+Content-Length: 12582912
+Accept-Ranges: bytes
+
+<video binary data>
+```
+
+**Response (206 Partial Content with Range):**
+```
+Content-Type: video/webm
+Content-Range: bytes 0-1024/12582912
+Content-Length: 1024
+Accept-Ranges: bytes
+
+<partial video data>
+```
+
+**Example:**
+```bash
+# Stream full video
+curl http://localhost:4100/api/sessions/{session_id}/video \
+  --output video.webm
+
+# Request partial content (for seeking)
+curl -H "Range: bytes=0-1024" \
+  http://localhost:4100/api/sessions/{session_id}/video \
+  --output video_chunk.webm
+
+# Browser automatically sends Range headers for seeking support
+```
+
+---
+
 ## Socket.IO Events
 
 ### Namespace: `/iot`
@@ -561,6 +666,43 @@ Each time window (500ms) is stored as a vector in Qdrant:
 [180-269] : 10 accel readings × 9 values (acc xyz, gyro xyz, angle rpy) = 90 dims
 ```
 
+### Video Metadata (Sessions Extension)
+
+Sessions can optionally include video recordings. Video metadata is stored in PostgreSQL:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `video_file_path` | TEXT | Filename of video file (e.g., "550e8400.webm") |
+| `video_duration_seconds` | REAL | Video length in seconds |
+| `video_size_bytes` | INTEGER | File size in bytes |
+
+**Example Session with Video:**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "ladder_climb_001",
+  "created_at": "2025-12-24T10:30:00.000Z",
+  "stopped_at": "2025-12-24T10:32:15.000Z",
+  "status": "stopped",
+  "video_file_path": "550e8400-e29b-41d4-a716-446655440000.webm",
+  "video_duration_seconds": 135.0,
+  "video_size_bytes": 12582912,
+  "window_count": 270
+}
+```
+
+**Video-Sensor Synchronization:**
+
+Video timestamps are synchronized with sensor data using `session.created_at` as the anchor point:
+
+```
+session.created_at = "2025-12-24T10:30:00.000Z"  (t=0)
+sensor_reading_at  = "2025-12-24T10:30:15.500Z"  (t=15.5s)
+video.currentTime  = 15.5 seconds
+
+Formula: videoTime = (sensorTimestamp - created_at) / 1000
+```
+
 ---
 
 ## Configuration
@@ -579,6 +721,9 @@ Each time window (500ms) is stored as a vector in Qdrant:
 | `VECTOR_DIMENSION` | 270 | Vector size |
 | `WINDOW_SIZE_MS` | 500 | Time window duration |
 | `ALLOWED_DEVICE_KEYS` | (empty) | Comma-separated device keys |
+| `VIDEO_STORAGE_PATH` | ./data/videos | Directory for video files |
+| `VIDEO_MAX_SIZE_MB` | 500 | Maximum video file size (MB) |
+| `VIDEO_ALLOWED_FORMATS` | webm | Allowed video formats |
 
 ### Sample .env File
 
@@ -593,6 +738,11 @@ SECRET_KEY=your-production-secret-key-here
 QDRANT_HOST=localhost
 QDRANT_PORT=6333
 QDRANT_COLLECTION=sensor_windows
+
+# Video
+VIDEO_STORAGE_PATH=./data/videos
+VIDEO_MAX_SIZE_MB=500
+VIDEO_ALLOWED_FORMATS=webm
 
 # Security
 ALLOWED_DEVICE_KEYS=firefighter_pi_001,firefighter_pi_002,firefighter_pi_003
