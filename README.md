@@ -20,11 +20,12 @@ cd firefighter-server
 docker-compose up -d
 
 # (Optional) Send realistic test data
+source venv/bin/activate
 python tests/realistic_activity_client.py --activity Standing --duration 30
 
 # Open the frontend
 cd ../frontend
-open index.html
+open record.html
 
 # Stop the server (from firefighter-server directory)
 cd ../firefighter-server
