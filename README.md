@@ -16,10 +16,13 @@ Data collection system for training an AI model that recognizes firefighter acti
 ```bash
 cd firefighter-server
 
+# Starting docker
+firefighter-server git:(working) docker-compose up -d
+
 # Activate virtual environment
 source venv/bin/activate
 
-# (Optional) Send test data
+# Send test data
 python tests/test_client.py --duration 30 --no-auto-session
 
 # Start the server
