@@ -55,6 +55,9 @@ current_session_id: str = None
 # Track currently detected activity per session (from frontend detector)
 detected_activities: Dict[str, Dict[str, Any]] = {}
 
+# Track currently detected pose activity per session (from frontend pose detector)
+detected_pose_activities: Dict[str, Dict[str, Any]] = {}
+
 # Valid activity types for Stage 1
 ACTIVITY_TYPES = [
     "Walking",
@@ -162,11 +165,17 @@ def handle_foot_data(data):
         session = repo.get(current_session_id)
         activity_label = session.activity_type if session else None
 
+    # Get current detected pose activity from frontend (if available)
+    pose_activity_label = None
+    if current_session_id in detected_pose_activities:
+        pose_detected = detected_pose_activities[current_session_id]
+        pose_activity_label = pose_detected["activity"]
+
     store = get_vector_store()
-    point_id = store.add_reading(current_session_id, "foot", data, label=activity_label)
+    point_id = store.add_reading(current_session_id, "foot", data, label=activity_label, pose_activity=pose_activity_label)
 
     if point_id:
-        print(f"[Qdrant] Stored foot window: {point_id} (label: {activity_label})")
+        print(f"[Qdrant] Stored foot window: {point_id} (label: {activity_label}, pose_activity: {pose_activity_label})")
 
 
 @socketio.on("accelerometer_data", namespace="/iot")
@@ -201,11 +210,17 @@ def handle_accel_data(data):
         session = repo.get(current_session_id)
         activity_label = session.activity_type if session else None
 
+    # Get current detected pose activity from frontend (if available)
+    pose_activity_label = None
+    if current_session_id in detected_pose_activities:
+        pose_detected = detected_pose_activities[current_session_id]
+        pose_activity_label = pose_detected["activity"]
+
     store = get_vector_store()
-    point_id = store.add_reading(current_session_id, "accel", data, label=activity_label)
+    point_id = store.add_reading(current_session_id, "accel", data, label=activity_label, pose_activity=pose_activity_label)
 
     if point_id:
-        print(f"[Qdrant] Stored accel window: {point_id} (label: {activity_label})")
+        print(f"[Qdrant] Stored accel window: {point_id} (label: {activity_label}, pose_activity: {pose_activity_label})")
 
 
 @socketio.on("activity_detected", namespace="/iot")
@@ -237,6 +252,37 @@ def handle_activity_detected(data):
     }
 
     print(f"[Activity] Detected: {activity} ({confidence}%) for session {session_id}")
+
+
+@socketio.on("pose_activity_data", namespace="/iot")
+def handle_pose_activity(data):
+    """
+    Handle pose-detected activity from frontend pose detector.
+
+    Expected data: {
+        "session_id": "uuid",
+        "activity": "Standing",
+        "confidence": 85,
+        "timestamp": "ISO datetime"
+    }
+    """
+    global detected_pose_activities
+
+    session_id = data.get("session_id")
+    activity = data.get("activity")
+    confidence = data.get("confidence", 0)
+
+    if not session_id or not activity:
+        return
+
+    # Store current detected pose activity in memory
+    detected_pose_activities[session_id] = {
+        "activity": activity,
+        "confidence": confidence,
+        "timestamp": datetime.utcnow()
+    }
+
+    print(f"[Pose Activity] Detected: {activity} ({confidence}%) for session {session_id}")
 
 
 # ============================================================

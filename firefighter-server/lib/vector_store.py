@@ -34,6 +34,7 @@ class SensorWindow:
     foot_readings: List[Dict] = field(default_factory=list)
     accel_readings: List[Dict] = field(default_factory=list)
     label: Optional[str] = None
+    pose_activity: Optional[str] = None
 
 
 class VectorStore:
@@ -182,6 +183,7 @@ class VectorStore:
         sensor_type: str,
         reading: Dict,
         label: Optional[str] = None,
+        pose_activity: Optional[str] = None,
     ) -> Optional[str]:
         """
         Add a sensor reading, accumulating into windows.
@@ -191,6 +193,7 @@ class VectorStore:
             sensor_type: "foot" or "accel"
             reading: Sensor reading data
             label: Optional activity label for this window
+            pose_activity: Optional pose-detected activity label for this window
 
         Returns:
             Point ID if a window was stored, None otherwise
@@ -208,13 +211,14 @@ class VectorStore:
 
         # Get or create active window
         if session_id not in self._active_windows:
-            print(f"[VectorStore DEBUG] Creating new window for session {session_id} with label: {label}")
+            print(f"[VectorStore DEBUG] Creating new window for session {session_id} with label: {label}, pose_activity: {pose_activity}")
             self._active_windows[session_id] = SensorWindow(
                 session_id=session_id,
                 device=reading.get("device", "unknown"),
                 start_time=timestamp_ms,
                 end_time=timestamp_ms,
                 label=label,
+                pose_activity=pose_activity,
             )
 
         window = self._active_windows[session_id]
@@ -224,7 +228,12 @@ class VectorStore:
             print(f"[VectorStore DEBUG] Updating window label to: {label}")
             window.label = label
 
-        print(f"[VectorStore DEBUG] Window label is now: {window.label}")
+        # Update pose_activity if provided
+        if pose_activity is not None:
+            print(f"[VectorStore DEBUG] Updating window pose_activity to: {pose_activity}")
+            window.pose_activity = pose_activity
+
+        print(f"[VectorStore DEBUG] Window label is now: {window.label}, pose_activity: {window.pose_activity}")
 
         # Add reading to appropriate list
         if sensor_type == "foot":
@@ -269,6 +278,7 @@ class VectorStore:
             "foot_count": len(window.foot_readings),
             "accel_count": len(window.accel_readings),
             "label": window.label,
+            "pose_activity": window.pose_activity,
             "raw_data": json.dumps({
                 "foot": window.foot_readings,
                 "accel": window.accel_readings,
