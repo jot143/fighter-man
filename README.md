@@ -23,7 +23,7 @@ firefighter-server git:(working) docker-compose up -d
 source venv/bin/activate
 
 # Send test data
-python tests/test_client.py --duration 30 --no-auto-session
+python tests/realistic_activity_client.py --activity Standing --duration 30
 
 # Start the server
 python server.py
