@@ -9,6 +9,7 @@
     <title>Stage 1 - Training Sessions</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.js"></script>
     <style>
         body {
             background: #0a0a0a;
@@ -112,9 +113,31 @@
             color: #9ca3af;
             font-size: 14px;
         }
+
+        /* Pose detection canvas overlays */
+        #pose-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            transform: scaleX(-1); /* Mirror to match video */
+        }
+
+        #replay-pose-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            /* No mirror transform for replay - video is not mirrored */
+        }
     </style>
     <script src="js/activityDetector.js"></script>
     <script src="js/videoRecorder.js"></script>
+    <script src="js/poseDetector.js"></script>
 </head>
 
 <body class="text-gray-200">
@@ -169,6 +192,7 @@
                     <!-- Video Container -->
                     <div id="video-container" class="hidden">
                         <video id="video-preview" autoplay muted playsinline></video>
+                        <canvas id="pose-canvas"></canvas>
                         <div id="recording-indicator" class="hidden">
                             <div class="dot"></div>
                             <span>REC</span>
@@ -177,6 +201,12 @@
                             <progress id="video-upload-progress" value="0" max="100"></progress>
                             <div id="upload-status" class="text-sm text-center text-white">Uploading video...</div>
                         </div>
+                    </div>
+
+                    <!-- Pose activity display below video -->
+                    <div id="pose-activity-display" class="text-center mt-4 hidden">
+                        <div class="text-sm text-gray-500 mb-1">Detected Activity (from video):</div>
+                        <div id="detectedPoseActivity" class="text-2xl font-semibold text-blue-400">Unknown</div>
                     </div>
 
                     <div id="centerContent" class="text-center">
@@ -226,6 +256,7 @@
                                 <!-- Video Playback (shown when video available) -->
                                 <div id="replay-video-container" class="hidden">
                                     <video id="replay-video" controls class="rounded-lg" style="max-width: 640px; max-height: 480px;"></video>
+                                    <canvas id="replay-pose-canvas"></canvas>
                                 </div>
 
                                 <!-- No-Video Placeholder (shown when no video) -->
@@ -235,6 +266,14 @@
                                         <h2 class="text-2xl font-semibold text-gray-400">Replay Mode</h2>
                                         <p class="text-gray-500 mt-2">No video available</p>
                                     </div>
+                                </div>
+
+                                <!-- Pose activity display below replay video -->
+                                <div id="replay-pose-activity-display" class="text-center mt-4 hidden">
+                                    <div class="text-sm text-gray-500 mb-1">Activity (from database):</div>
+                                    <div id="replayPoseActivity" class="text-2xl font-semibold text-blue-400">-</div>
+                                    <!-- Optional: Show live re-detected activity -->
+                                    <div class="text-xs text-gray-500 mt-2">Live: <span id="replayPoseActivityLive">-</span></div>
                                 </div>
                             </div>
 
@@ -470,6 +509,9 @@
         // Video recording
         let videoRecorder = null;         // Video recorder instance
 
+        // Pose detection
+        let poseDetector = null;          // Pose detector instance
+
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             initFootBars();
@@ -484,6 +526,19 @@
                 console.log('[Video] VideoRecorder initialized');
             } else {
                 console.warn('[Video] Video recording not supported in this browser');
+            }
+
+            // Initialize pose detector if supported
+            if (typeof ml5 !== 'undefined' && PoseDetector.isSupported()) {
+                poseDetector = new PoseDetector({
+                    modelType: 'SINGLEPOSE_LIGHTNING',
+                    smoothing: true,
+                    minScore: 0.25,
+                    flipped: true
+                });
+                console.log('[Pose] PoseDetector initialized');
+            } else {
+                console.warn('[Pose] ml5.js or PoseDetector not supported in this browser');
             }
 
             connectSocket();
@@ -660,6 +715,9 @@
                         });
                     }
                 }
+
+                // NOTE: Pose activity display is now updated by a continuous requestAnimationFrame loop
+                // started in startRecording() - no need to update here on every accel_data event
             });
 
             // Store socket for later use
@@ -809,6 +867,31 @@
                     try {
                         await videoRecorder.init('video-preview');
                         console.log('[Video] Camera initialized');
+
+                        // Wait for video to load data, then initialize pose detection
+                        if (poseDetector) {
+                            const videoElement = document.getElementById('video-preview');
+                            if (videoElement) {
+                                // Wait for video to have data before initializing pose detector
+                                const initPoseDetector = async () => {
+                                    try {
+                                        await poseDetector.init('video-preview', 'pose-canvas');
+                                        console.log('[Pose] Initialized on video preview');
+                                    } catch (error) {
+                                        console.warn('[Pose] Initialization failed:', error.message);
+                                    }
+                                };
+
+                                // If video already has data, init immediately
+                                if (videoElement.readyState >= 3) { // HAVE_FUTURE_DATA or better
+                                    await initPoseDetector();
+                                } else {
+                                    // Otherwise, wait for loadeddata event
+                                    videoElement.addEventListener('loadeddata', initPoseDetector, { once: true });
+                                    console.log('[Pose] Waiting for video data before initialization...');
+                                }
+                            }
+                        }
                     } catch (error) {
                         console.warn('[Video] Camera initialization failed:', error.message);
                         // Continue without video
@@ -839,6 +922,45 @@
                     try {
                         await videoRecorder.startRecording(session.id);
                         console.log('[Video] Recording started');
+
+                        // Start pose detection after video recording starts
+                        if (poseDetector && poseDetector.getState() === 'ready') {
+                            try {
+                                await poseDetector.startDetection();
+                                console.log('[Pose] Detection started');
+
+                                // Start continuous pose activity display update loop
+                                const updatePoseActivityDisplay = () => {
+                                    if (!isRecording || !poseDetector || poseDetector.getState() !== 'detecting') {
+                                        return;
+                                    }
+
+                                    const poseActivity = poseDetector.getCurrentActivity();
+                                    if (poseActivity && poseActivity.activity !== 'Unknown') {
+                                        document.getElementById('detectedPoseActivity').textContent = poseActivity.activity;
+
+                                        // Send pose activity to backend for window labeling (throttled to 1 per second)
+                                        if (currentSessionId && (!window.lastPoseEmitTime || Date.now() - window.lastPoseEmitTime > 1000)) {
+                                            window.iotSocket.emit('pose_activity_data', {
+                                                session_id: currentSessionId,
+                                                activity: poseActivity.activity,
+                                                confidence: poseActivity.confidence,
+                                                timestamp: new Date().toISOString()
+                                            });
+                                            window.lastPoseEmitTime = Date.now();
+                                        }
+                                    }
+
+                                    window.poseUpdateLoopId = requestAnimationFrame(updatePoseActivityDisplay);
+                                };
+
+                                // Start the loop
+                                updatePoseActivityDisplay();
+                                console.log('[Pose] Activity update loop started');
+                            } catch (error) {
+                                console.warn('[Pose] Failed to start detection:', error.message);
+                            }
+                        }
                     } catch (error) {
                         console.warn('[Video] Failed to start recording:', error.message);
                     }
@@ -881,6 +1003,19 @@
 
                 isRecording = false;
                 stopRecordingTimer();
+
+                // Stop pose detection
+                if (poseDetector && poseDetector.getState() === 'detecting') {
+                    poseDetector.stopDetection();
+                    console.log('[Pose] Detection stopped');
+                }
+
+                // Stop pose activity update loop
+                if (window.poseUpdateLoopId) {
+                    cancelAnimationFrame(window.poseUpdateLoopId);
+                    window.poseUpdateLoopId = null;
+                    console.log('[Pose] Activity update loop stopped');
+                }
 
                 // Clear detection state
                 if (activityDetector) {
@@ -966,6 +1101,8 @@
                 if (videoRecorder && videoRecorder.stream) {
                     videoContainer.classList.remove('hidden');
                     recordingIndicator.classList.remove('hidden');
+                    // Show pose activity display
+                    document.getElementById('pose-activity-display').classList.remove('hidden');
                 }
             } else {
                 btn.innerHTML = `
@@ -981,6 +1118,8 @@
                 // Hide video preview and recording indicator
                 videoContainer.classList.add('hidden');
                 recordingIndicator.classList.add('hidden');
+                // Hide pose activity display
+                document.getElementById('pose-activity-display').classList.add('hidden');
             }
         }
 
@@ -1216,12 +1355,35 @@
                     replayVideoContainer.classList.remove('hidden');
                     replayNoVideo.classList.add('hidden');
                     console.log('[Video] Loaded video for replay:', replayData.session.video_file_path);
+
+                    // Initialize pose detection on replay video
+                    if (poseDetector) {
+                        try {
+                            // Wait for video metadata to load before initializing pose detection
+                            replayVideo.addEventListener('loadedmetadata', async () => {
+                                try {
+                                    await poseDetector.init('replay-video', 'replay-pose-canvas');
+                                    console.log('[Pose] Initialized on replay video');
+                                } catch (error) {
+                                    console.warn('[Pose] Replay initialization failed:', error.message);
+                                }
+                            }, { once: true });
+                        } catch (error) {
+                            console.warn('[Pose] Failed to set up replay pose detection:', error.message);
+                        }
+                    }
+
+                    // Show replay pose activity display
+                    document.getElementById('replay-pose-activity-display').classList.remove('hidden');
                 } else {
                     // No video available - show no-video placeholder, hide video container
                     replayVideo.src = '';
                     replayVideoContainer.classList.add('hidden');
                     replayNoVideo.classList.remove('hidden');
                     console.log('[Video] No video available for this session');
+
+                    // Hide replay pose activity display
+                    document.getElementById('replay-pose-activity-display').classList.add('hidden');
                 }
 
                 // Update timeline with session data and ALL windows metadata (not just first batch)
@@ -1648,6 +1810,16 @@
                 replayVideo.play().catch(err => {
                     console.warn('[Video] Playback failed:', err.message);
                 });
+
+                // Start pose detection on replay video
+                if (poseDetector && poseDetector.getState() === 'ready') {
+                    try {
+                        poseDetector.startDetection();
+                        console.log('[Pose] Detection started on replay');
+                    } catch (error) {
+                        console.warn('[Pose] Failed to start replay detection:', error.message);
+                    }
+                }
             }
 
             // Start playback loop
@@ -1686,6 +1858,12 @@
             const replayVideo = document.getElementById('replay-video');
             if (replayVideo && replayVideo.src) {
                 replayVideo.pause();
+            }
+
+            // Stop pose detection when pausing
+            if (poseDetector && poseDetector.getState() === 'detecting') {
+                poseDetector.stopDetection();
+                console.log('[Pose] Detection stopped (replay paused)');
             }
 
             // Clear activity detector state when pausing
@@ -1832,6 +2010,21 @@
                     updateActivityDisplay('Unknown', 0);
                     console.log('[Replay] No label stored for window at',
                         Math.floor((currentWindow.start_time - replaySessionStartTime) / 1000) + 's');
+                }
+
+                // Display stored pose activity from database
+                const poseActivityEl = document.getElementById('replayPoseActivity');
+                if (poseActivityEl) {
+                    poseActivityEl.textContent = currentWindow.pose_activity || 'Not Available';
+                }
+            }
+
+            // Update live pose activity (re-detected from video)
+            if (poseDetector && poseDetector.getState() === 'detecting') {
+                const livePoseActivity = poseDetector.getCurrentActivity();
+                const livePoseEl = document.getElementById('replayPoseActivityLive');
+                if (livePoseEl && livePoseActivity) {
+                    livePoseEl.textContent = livePoseActivity.activity;
                 }
             }
 
