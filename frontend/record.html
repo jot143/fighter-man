@@ -39,17 +39,14 @@
 
         #video-container {
             position: relative;
-            max-width: 640px;
-            max-height: 480px;
             margin: 0 auto 2rem;
         }
 
-        #video-preview {
-            width: 100%;
-            height: auto;
+        /* p5.js creates the canvas - style it */
+        #video-container canvas {
+            display: block;
             border-radius: 8px;
-            background: #000;
-            transform: scaleX(-1); /* Mirror the video */
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
         }
 
         #recording-indicator {
@@ -113,8 +110,11 @@
             font-size: 14px;
         }
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
     <script src="js/activityDetector.js"></script>
     <script src="js/videoRecorder.js"></script>
+    <script src="js/poseSketch.js"></script>
 </head>
 
 <body class="text-gray-200">
@@ -166,9 +166,9 @@
             <!-- Center - Recording Info / Video Placeholder -->
             <div class="flex-1 flex flex-col bg-gradient-to-b from-gray-900 to-black">
                 <div class="flex-1 flex items-center justify-center p-8">
-                    <!-- Video Container -->
+                    <!-- Video Container - p5.js will create canvas here -->
                     <div id="video-container" class="hidden">
-                        <video id="video-preview" autoplay muted playsinline></video>
+                        <!-- p5.js canvas will be inserted here -->
                         <div id="recording-indicator" class="hidden">
                             <div class="dot"></div>
                             <span>REC</span>
@@ -469,6 +469,9 @@
 
         // Video recording
         let videoRecorder = null;         // Video recorder instance
+
+        // Pose visualization (p5.js based)
+        let poseSketch = null;            // Pose sketch instance
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
@@ -804,17 +807,33 @@
             const sessionName = document.getElementById('sessionName').value;
 
             try {
-                // Initialize video camera if available
+                // Show video container first
+                const videoContainer = document.getElementById('video-container');
+                videoContainer.classList.remove('hidden');
+
+                // Create p5.js pose sketch with camera and skeleton
+                console.log('[Pose] Creating p5.js pose sketch...');
+                poseSketch = createPoseSketch('video-container', {
+                    width: 640,
+                    height: 480,
+                    mirror: true,
+                    showSkeleton: true,
+                    showKeypoints: true,
+                    confidenceThreshold: 0.3
+                });
+
+                // Wait for the sketch to be ready and get the canvas stream
+                console.log('[Video] Waiting for pose sketch canvas to be ready...');
+                const canvasStream = await poseSketch.getCanvasStream();
+                console.log('[Video] Got canvas stream with skeleton overlay');
+
+                // Initialize video recorder with the canvas stream
                 if (videoRecorder) {
-                    try {
-                        await videoRecorder.init('video-preview');
-                        console.log('[Video] Camera initialized');
-                    } catch (error) {
-                        console.warn('[Video] Camera initialization failed:', error.message);
-                        // Continue without video
-                    }
+                    videoRecorder.stream = canvasStream;
+                    console.log('[Video] VideoRecorder stream set to canvas stream');
                 }
 
+                // Create session on server
                 const response = await fetch(`${SERVER_URL}/api/sessions`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -834,11 +853,11 @@
                 footReadingCount = 0;
                 accelReadingCount = 0;
 
-                // Start video recording
+                // Start video recording with canvas stream
                 if (videoRecorder && videoRecorder.stream) {
                     try {
                         await videoRecorder.startRecording(session.id);
-                        console.log('[Video] Recording started');
+                        console.log('[Video] Recording started with skeleton overlay');
                     } catch (error) {
                         console.warn('[Video] Failed to start recording:', error.message);
                     }
@@ -851,15 +870,20 @@
                 document.getElementById('activityLabel').textContent = 'Waiting...';
                 document.getElementById('activityConfidence').textContent = '';
 
-                // Update UI
+                // Update UI (show recording indicator)
                 updateRecordingUI(true);
                 startRecordingTimer();
-                // Don't call loadSessions() here - socket event will handle it
 
                 console.log('Recording started:', session);
             } catch (error) {
                 console.error('Failed to start recording:', error);
                 alert('Failed to start recording: ' + error.message);
+
+                // Clean up on error
+                if (poseSketch) {
+                    poseSketch.stop();
+                    poseSketch = null;
+                }
             }
         }
 
@@ -885,6 +909,13 @@
                 // Clear detection state
                 if (activityDetector) {
                     activityDetector.reset();
+                }
+
+                // Stop pose sketch (p5.js)
+                if (poseSketch) {
+                    poseSketch.stop();
+                    poseSketch = null;
+                    console.log('[Pose] Pose sketch stopped');
                 }
 
                 updateRecordingUI(false);
@@ -962,11 +993,8 @@
                 recordingState.classList.remove('hidden');
                 document.getElementById('selectedActivity').textContent = activityType;
 
-                // Show video preview and recording indicator
-                if (videoRecorder && videoRecorder.stream) {
-                    videoContainer.classList.remove('hidden');
-                    recordingIndicator.classList.remove('hidden');
-                }
+                // Show recording indicator (video container already shown by startRecording)
+                recordingIndicator.classList.remove('hidden');
             } else {
                 btn.innerHTML = `
                     <span class="w-3 h-3 rounded-full bg-white"></span>
